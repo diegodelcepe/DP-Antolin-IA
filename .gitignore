@@ -1,0 +1,10 @@
+# entornos / cachés
+.venv/
+__pycache__/
+*.pyc
+
+# overlays generados por la app
+Backend/static/overlays/
+
+# variables locales
+.env
