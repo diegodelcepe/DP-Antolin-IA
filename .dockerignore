@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.ipynb_checkpoints
+.git/
+.gitignore
+.gitattributes
+Dataset/
+Backend/static/overlays/
