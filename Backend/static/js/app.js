@@ -41,29 +41,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Click "Analizar"
   btn.addEventListener('click', async () => {
-    const f = fileEl.files?.[0];
-    if (!f) { alert('Selecciona una imagen.'); return; }
+  if (!fileEl.files.length) {
+    alert('Selecciona una o más imágenes.');
+    return;
+  }
 
-    // Construimos la URL con los parámetros de query (thr/mode)
-    let url = '/predict';
-    const qs = new URLSearchParams();
-    if (thrManual.checked && thrValue.value) {
-      qs.set('thr', thrValue.value);
-    }
-    if (modeSel.value) {
-      qs.set('mode', modeSel.value);
-    }
-    const qsStr = qs.toString();
-    if (qsStr) url += `?${qsStr}`;
+  // Construimos la URL con los parámetros de query (thr/mode)
+  let url = '/predict';
+  const qs = new URLSearchParams();
+  if (thrManual.checked && thrValue.value) {
+    qs.set('thr', thrValue.value);
+  }
+  if (modeSel.value) {
+    qs.set('mode', modeSel.value);
+  }
+  const qsStr = qs.toString();
+  if (qsStr) url += `?${qsStr}`;
 
-    // Cuerpo (multipart/form-data) solo con el archivo
+  // Reset UI
+  result.innerHTML = '';
+  overlayBox.innerHTML = '';
+  jsonBox.textContent = '';
+
+  // Procesar cada archivo
+  for (const f of fileEl.files) {
     const fd = new FormData();
     fd.append('file', f);
-
-    // Reset UI
-    result.innerHTML = 'Procesando...';
-    overlayBox.innerHTML = '';
-    jsonBox.textContent = '';
 
     try {
       const r = await fetch(url, { method: 'POST', body: fd });
@@ -74,30 +77,36 @@ document.addEventListener('DOMContentLoaded', () => {
         ? `<span class="badge warn">ANOMALÍA</span>`
         : `<span class="badge ok">NORMAL</span>`;
 
-      // Mostrar resultado
       const thrText = (typeof data.threshold === 'number')
         ? data.threshold.toFixed(6)
         : String(data.threshold);
 
-      result.innerHTML = `
+      //Creamos un bloque para esta imagen
+      const item = document.createElement('div');
+      item.classList.add('result-item');
+      item.innerHTML = `
+        <h4>${f.name}</h4>
         ${badge}
         <div>score=<b>${Number(data.score).toFixed(6)}</b>,
         threshold=<b>${thrText}</b></div>
+        ${data.overlay_url ? `<img src="${data.overlay_url}" alt="overlay" />` : ''}
       `;
 
-      // Overlay (si el backend lo guardó)
-      if (data.overlay_url) {
-        overlayBox.innerHTML = `
-          <label>Overlay:</label><br/>
-          <img src="${data.overlay_url}" alt="overlay" />
-        `;
-      }
+      result.appendChild(item);
 
-      // JSON crudo
-      jsonBox.textContent = JSON.stringify(data, null, 2);
+      // También añadimos su JSON
+      jsonBox.textContent += `${f.name}:\n${JSON.stringify(data, null, 2)}\n\n`;
 
     } catch (err) {
-      result.innerHTML = `<span class="badge warn">Error</span> ${err.message}`;
+      const item = document.createElement('div');
+      item.classList.add('result-item');
+      item.innerHTML = `
+        <h4>${f.name}</h4>
+        <span class="badge warn">Error</span> ${err.message}
+      `;
+      result.appendChild(item);
     }
-  });
+  }
+
+});
 });
