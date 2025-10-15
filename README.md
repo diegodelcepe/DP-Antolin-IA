@@ -25,3 +25,8 @@ El sistema puede ejecutarse en cualquier equipo con **Docker Desktop (WSL2)** si
 ```bash
 docker compose up --build
 ```
+
+### Detener y limpiar los contenedores
+```bash
+docker compose down
+```
