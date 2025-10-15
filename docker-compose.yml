@@ -1,0 +1,9 @@
+services:
+  app:
+    build: .
+    image: inspector-patchcore:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./Backend/static/overlays:/app/Backend/static/overlays
+      - ./.cache/torch:/app/.cache/torch

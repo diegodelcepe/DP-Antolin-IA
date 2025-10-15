@@ -16,3 +16,11 @@ python -m venv .venv
 pip install -r requirements.txt
 copy .env.example .env  # ajusta variables si quieres
 uvicorn main:app --reload --port 8000
+
+## Despliegue con Docker Compose
+El sistema puede ejecutarse en cualquier equipo con **Docker Desktop (WSL2)** sin necesidad de instalar Python ni dependencias manuales.
+
+### Construcción y ejecución
+```bash
+docker compose up --build
+```
