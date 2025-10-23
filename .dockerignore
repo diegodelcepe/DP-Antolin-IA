@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.venv/
+.env
+
+.git
+.gitattributes
+.gitignore
+
+Dataset/
+notebooks/
+.vscode/
+.DS_Store
+Thumbs.db

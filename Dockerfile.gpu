@@ -1,0 +1,39 @@
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 python3.11-distutils python3-pip \
+    build-essential git curl ca-certificates \
+    libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ln -s /usr/bin/python3.11 /usr/bin/python
+WORKDIR /app
+
+# Reqs viven en Backend/
+COPY Backend/requirements.txt /app/requirements.txt
+RUN python -m pip install --upgrade pip && \
+    python -m pip install --no-cache-dir -r /app/requirements.txt && \
+    python - <<'PY'
+import importlib
+for m in ("fastapi","uvicorn","torch","torchvision","numpy","sklearn"):
+    importlib.import_module(m)
+print("OK: requirements instalados y módulos importables")
+PY
+
+# Copiamos TODO el repo
+COPY . /app
+
+# Asegura la carpeta real de overlays
+RUN mkdir -p /app/Backend/static/overlays
+
+EXPOSE 8000
+
+ENV NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# Ojo: tu app está en Backend/main.py
+CMD ["python", "-m", "uvicorn", "Backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

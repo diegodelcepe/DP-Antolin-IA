@@ -1,0 +1,9 @@
+numpy
+opencv-python
+pillow
+torch
+torchvision
+scikit-learn
+tqdm
+matplotlib
+pytorch-msssim    # opcional, solo si quieres el loss con MS-SSIM
