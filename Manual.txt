@@ -24,4 +24,20 @@ Ahora, haciendo uso de uvicorn, iniciaremos la aplicación ejecutando el comando
 Con todos los pasos realizados, ya puedes iniciar la aplicación web. Únicamente tendrás que abrir tu navegador de preferencia y pegar en la barra de búsqueda la dirección web "http://127.0.0.1:8000". IMPORTANTE: No cierres la terminal en la cual has iniciado la aplicación. De hacerlo, la ejecución terminaría.
 
 
+-DESPLIEGUE CON DOCKER
+Lo primero de todo será descargar docker en la microsoft store, o en su pagina oficial. Puede descargarse desde este enlace: "https://www.docker.com/products/docker-desktop". Al abrirlo, puede que necesites activar la virtualización en tu sistema operativo.
+Para comprobar si tienes la virtualización activada, puedes irte al administrador de tareas, rendimiento, y en CPU podrás verificar si la virtualización esta habilitada o no.
 
+-PASO OPCIONAL - SOLO PARA AQUELLOS CON LA VIRTUALIZACION INHABILITADA.
+Primero de todo, vamos a abrir la powershell de windows como administrador y vamos a pegar los comandos: "dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart", "dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart", y "dism.exe /online /enable-feature /featurename:Microsoft-Hyper-V-All /all /norestart". Después, vamos a escribir el comando "bcdedit /set hypervisorlaunchtype auto", y posteriormente reiniciamos nuestro ordenador.
+Con el ordenador ya reiniciado, nos iremos de nuevo a la powershell como administrador y escribiremos el comando "wsl --install" en caso de que no tengas el wsl instalado ya. Si por el contrario lo tienes, ejecuta "wsl --update" para actualizarlo, "wsl --set-default-version 2", y "wsl --status".
+Para verificar que todo ha ido bien, puedes ejecutar los comandos "docker version", y "docker run hello-world". Si la salida que te da por terminal es el mensaje de bienvenida de docker, ha salido todo perfecto.
+
+-DOCKER - Primer Arranque y setup de la aplicación. ADVERTENCIA: este proceso solo debe llevarse a cabo la primera vez que lanzas la aplicación.
+Ahora, con el docker funcionando, clonamos el repositorio con "git clone https://github.com/diegodelcepe/DP-Antolin-IA.git", y cambiamos a la carpeta del repositorio con "cd DP-Antolin-IA". 
+A continuación, cambiaremos a la rama que tiene docker funcional. Para ello escribiremos "git fetch origin", para asegurarnos de que lo tenemos actualizado, y "git checkout docker-mvp".
+Por último, nos quedaría iniciar el docker y que este nos contenedorice el proceso e instale todas las dependencias y archivos que necesitamos para poder lanzar la aplicación. ATENCIÓN: Como mínimo se necesitarán alrededor de 13 GB de tamaño libres en tu ordenador para poder ejecutar la aplicación.
+Ejecutamos en la terminal el comando "docker compose build --no-cache". Este proceso tardará aproximadamente entre 5 y 10 minutos. Después, pondremos el comando "docker compose up -d" y "docker compose logs -f". Una vez hecho esto, solo tienes que acceder a http://127.0.0.1:8000 en tu navegador de preferencia para acceder a la aplicación.
+
+-Lanzamiento de la aplicación una vez realizado el primer arranque
+Una vez hecho el primer arranque de la aplicación y con el docker configurado, para lanzarlo de nuevo tan solo tendremos que ejecutarla desde el propio docker desktop, y tambien es recomendable hacer "git fetch origin && git checkout docker-mvp", por si se encuentra alguna actualización. 
