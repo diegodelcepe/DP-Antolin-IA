@@ -1,0 +1,27 @@
+DP Antolín IA - Manual de Ejecución de la Aplicación.
+
+La finalidad de este documento es facilitar la preparación para la ejecución de la aplicación.
+
+1.Clonar el repositorio
+Lo primero que haremos será clonar el repositorio donde se aloja la aplicación para tenerla en nuestro equipo. Para ello, abriremos la powershell, y ejecutaremos el comando "git clone https://https://github.com/diegodelcepe/DP-Antolin-IA.git".Es posible que necesites instalar git en tu equipo. Si no sabes si lo tienes instalado, puedes pegar en tu terminal el comando "git --version". Si te sale algo como "git version 2.51.0.windows.2", este paso te lo puedes saltar. Por el contrario, si necesitas instalar git, para windows tienes que ejecutar en la powershell como administrador el comando "winget install --id Git.Git -e". En el caso de tener ubuntu, deberás ejecutar el comando "sudo apt update && sudo apt install -y git".
+
+2.Instalar Python
+Para llevar a cabo la ejecución de nuestra aplicación por la terminal, deberemos de contar con python instalado. Para comprobar si ya lo tienes instalado, puedes ejecutar en la terminal el comando "python --version". Si por el contrario necesitas instalarlo, puedes hacerlo entrando en "https://www.python.org/downloads" y siguiendo las instrucciones del instalador. En ubuntu, puedes hacerlo a través del comando "sudo apt install -y python3 python3-pip python3-venv" .La aplicación funciona con todas las versiones de python a partir de la 3.10, pero recomendamos la instalación de la más reciente, actualmente la 3.13.9.
+
+3.Activación de venv
+Ya con el repositorio creado y con python instalado, nos situamos en la terminal en la ubicación donde hemos guardado el repositorio y accedemos a la carpeta Backend del repositorio con el comando "cd DP-Antolin-IA/Backend". Una vez dentro, procederemos a activar python con el comando "python -m venv .venv". Tendrás que esperar unos segundos para continuar. Acto seguido, ejecutaremos el comando ".venv\Scripts\activate" en windows.
+
+4.Instalar dependencias
+Para seguir con la preparación, es necesario instalar las dependencias, que incluyen uvicorn, scikit-learn, torch, y pillow, y numpy entre otros. Para facilitar el proceso, en lugar de instalar cada una de ellas por separado, lo cual puede dar lugar a problemas con las versiones, y por medio del fichero requirements.txt, tendremos que ejecutar en la terminal el comando "pip install -r requirements.txt". El proceso puede tardar entre 5-10 minutos aproximadamente. Al finalizar, podremos continuar con el siguiente paso.
+
+5.Ajustar variables e iniciar la aplicación. [OPCIONAL]
+El siguiente paso es ejecutar en la terminal "copy .env.example .env" para ajustar las variables de la aplicación. Este paso no es obligatorio realizarlo, ya que la aplicación podrá ejecutarse de igual forma.
+
+6.Inicialización de la aplicación
+Ahora, haciendo uso de uvicorn, iniciaremos la aplicación ejecutando el comando "uvicorn main:app --reload --port 8000". Este proceso puede tardar unos 2 minutos, y una vez veas que en tu terminal aparece la línea "INFO:     Application startup complete.", estaremos listos para hacer el último paso.
+
+7.Acceso a la aplicación web.
+Con todos los pasos realizados, ya puedes iniciar la aplicación web. Únicamente tendrás que abrir tu navegador de preferencia y pegar en la barra de búsqueda la dirección web "http://127.0.0.1:8000". IMPORTANTE: No cierres la terminal en la cual has iniciado la aplicación. De hacerlo, la ejecución terminaría.
+
+
+
