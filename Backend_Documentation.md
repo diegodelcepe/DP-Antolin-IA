@@ -198,7 +198,13 @@ Objetivo: ofrecer instrucciones explícitas para ejecutar el backend localmente 
      ```
      docker compose up --build
      ```
-  2) Verificación de servicio (UI y salud):
+  2) Otra Opcion
+    ```
+    docker compose build --no-cache
+    docker compose up -d
+    docker compose logs -f
+    ```
+  3) Verificación de servicio (UI y salud):
      - Interfaz: http://localhost:8000 o http://12.0.0.1:8000
      - Salud: http://localhos:8000/health
 
