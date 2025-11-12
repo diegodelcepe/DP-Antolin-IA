@@ -25,8 +25,8 @@ Con todos los pasos realizados, ya puedes iniciar la aplicación web. Únicament
 
 
 -DESPLIEGUE CON DOCKER
-Lo primero de todo será descargar docker en la microsoft store, o en su pagina oficial. Puede descargarse desde este enlace: "https://www.docker.com/products/docker-desktop". Al abrirlo, puede que necesites activar la virtualización en tu sistema operativo.
-Para comprobar si tienes la virtualización activada, puedes irte al administrador de tareas, rendimiento, y en CPU podrás verificar si la virtualización esta habilitada o no.
+Lo primero de todo será descargar docker en la microsoft store(buscar docker desktop), o en su pagina oficial. Puede descargarse desde este enlace: "https://www.docker.com/products/docker-desktop". Al abrirlo, puede que necesites activar la virtualización en tu sistema operativo.
+Para comprobar si tienes la virtualización activada, puedes irte al administrador de tareas, luego rendimiento, y en CPU podrás verificar si la virtualización esta habilitada o no.
 
 -PASO OPCIONAL - SOLO PARA AQUELLOS CON LA VIRTUALIZACION INHABILITADA.
 Primero de todo, vamos a abrir la powershell de windows como administrador y vamos a pegar los comandos: "dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart", "dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart", y "dism.exe /online /enable-feature /featurename:Microsoft-Hyper-V-All /all /norestart". Después, vamos a escribir el comando "bcdedit /set hypervisorlaunchtype auto", y posteriormente reiniciamos nuestro ordenador.
