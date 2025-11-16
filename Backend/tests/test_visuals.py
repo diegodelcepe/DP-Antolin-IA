@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 import main as appmod
 
+
 def test_save_visuals_and_polys(tmp_path, monkeypatch):
     # Redirigir STATIC_DIR
     monkeypatch.setattr(appmod, "STATIC_DIR", str(tmp_path/"static"), raising=False)
