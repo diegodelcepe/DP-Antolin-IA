@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 import main as appmod
 
+
 def _make_image_bytes():
     img = np.zeros((128,128,3), np.uint8)
     cv2.circle(img, (64,64), 20, (0,0,255), -1)
@@ -18,16 +19,28 @@ def test_health(client):
     assert "device" in data and "img_size" in data
 
 def test_predict_ok(client, monkeypatch):
-    # Forzar SAVE_VIS
+    # Forzar SAVE_VIS para probar overlay
     monkeypatch.setattr(appmod, "SAVE_VIS", True, raising=False)
 
     files = {"file": ("f.png", _make_image_bytes(), "image/png")}
     r = client.post("/predict", files=files)
+
     assert r.status_code == 200
     data = r.json()
-    assert set(data.keys()) == {"score", "threshold", "is_anomaly", "polygons", "overlay_url"}
+
+    # Campos obligatorios
+    required = {"score", "threshold", "is_anomaly", "polygons", "overlay_url"}
+    assert required.issubset(data.keys())
+
+    # Campos opcionales permitidos
+    optional = {"polygon_areas_px"}
+    assert set(data.keys()).issubset(required | optional)
+
     assert isinstance(data["score"], float)
-    assert data["overlay_url"] is None or data["overlay_url"].startswith("/static/")
+
+    # overlay_url puede ser None o un path válido
+    if data["overlay_url"] is not None:
+        assert data["overlay_url"].startswith("/static/")
 
 def test_predict_modes(client, monkeypatch):
     # Controlar salida de anomaly_map_and_score para probar umbral
