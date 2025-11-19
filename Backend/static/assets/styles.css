@@ -217,6 +217,34 @@ tr:hover{background:rgba(255,255,255,.04)}
   white-space:pre-wrap;
 }
 
+/* Panel cámara */
+.camera-box{
+  position:relative;
+  flex:1;
+  min-width:220px;
+  max-width:360px;
+  border-radius:12px;
+  overflow:hidden;
+  border:1px solid var(--stroke);
+  background:#0e1626;
+}
+.camera-box video,
+.camera-box img{
+  width:100%;
+  display:block;
+  aspect-ratio:4/3;
+  object-fit:cover;
+}
+.camera-overlay-label{
+  position:absolute;
+  left:8px;
+  bottom:8px;
+  padding:4px 8px;
+  border-radius:999px;
+  background:rgba(0,0,0,.6);
+  font-size:11px;
+}
+
 /* responsive */
 @media (max-width: 1000px){
   .app{grid-template-columns:1fr}

@@ -42,6 +42,17 @@
         </div>
       </section>
 
+      <!-- Cámara en tiempo real -->
+      <section class="card">
+        <h2>Cámara en tiempo real</h2>
+        <p class="muted small">
+          Activa la cámara para inspeccionar piezas en vivo. Cada 1.5s se envía un frame al backend y se registra.
+        </p>
+        <div class="row mtop-8">
+          <button id="cameraToggleBtn" class="btn btn-outline">Activar cámara</button>
+        </div>
+      </section>
+
       <section class="card">
         <h2>Opciones</h2>
 
@@ -73,7 +84,7 @@
       </section>
 
       <footer class="muted tiny">
-        v1.2 • ResNet18 • KNN PatchCore
+        v1.3 • ResNet18 • KNN PatchCore
       </footer>
     </aside>
 
@@ -113,6 +124,44 @@
         </div>
       </section>
 
+      <!-- Panel cámara -->
+      <section class="card glass hidden" id="cameraPanel">
+        <h3>Inspección en tiempo real</h3>
+        <p class="muted small">
+          Capturando frames de la cámara y enviándolos al modelo PatchCore.
+        </p>
+
+        <div class="row mtop-8">
+          <div class="camera-box">
+            <video id="cameraVideo" autoplay playsinline muted></video>
+            <div class="camera-overlay-label muted small">Entrada cámara</div>
+          </div>
+          <div class="camera-box">
+            <img id="cameraOverlay" alt="Overlay de defectos"/>
+            <div class="camera-overlay-label muted small">Overlay con defectos</div>
+          </div>
+        </div>
+
+        <div class="row mtop-8">
+          <div class="kpi">
+            <div class="kpi-title">Score</div>
+            <div class="kpi-value" id="camScore">0.000</div>
+          </div>
+          <div class="kpi warn">
+            <div class="kpi-title">Área total defecto (px)</div>
+            <div class="kpi-value" id="camAreaTotal">0</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-title">Estado</div>
+            <div class="kpi-value" id="camState">-</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-title">IoU</div>
+            <div class="kpi-value" id="camIoU">-</div>
+          </div>
+        </div>
+      </section>
+
       <section class="card glass">
         <div class="tabs">
           <button id="tabGrid" class="tab active">Galería</button>
@@ -131,6 +180,8 @@
                 <th>Estado</th>
                 <th>Polígonos</th>
                 <th>Área total (px)</th>
+                <th>Área máx (px)</th>
+                <th>IoU</th>
                 <th>Overlay</th>
               </tr>
             </thead>
@@ -149,4 +200,3 @@
   <script src="/static/assets/app.js"></script>
 </body>
 </html>
-

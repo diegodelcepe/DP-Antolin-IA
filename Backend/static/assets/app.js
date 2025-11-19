@@ -30,9 +30,25 @@ const tabTable = document.getElementById('tabTable');
 const toggleViewBtn = document.getElementById('toggleViewBtn');
 const downloadCsvBtn = document.getElementById('downloadCsvBtn');
 
+// Cámara
+const cameraToggleBtn = document.getElementById('cameraToggleBtn');
+const cameraPanel = document.getElementById('cameraPanel');
+const cameraVideo = document.getElementById('cameraVideo');
+const cameraOverlayImg = document.getElementById('cameraOverlay');
+const camScore = document.getElementById('camScore');
+const camAreaTotal = document.getElementById('camAreaTotal');
+const camState = document.getElementById('camState');
+const camIoU = document.getElementById('camIoU');
+
 // --- estado ---
 let selectedFiles = []; // File[]
 let lastBatch = null;   // respuesta JSON del backend
+
+// Estado de cámara
+let cameraStream = null;
+let cameraIntervalId = null;
+let cameraBusy = false;
+const CAMERA_INTERVAL_MS = 1500; // 1.5 segundos
 
 // --- helpers ---
 function isImage(f){
@@ -101,16 +117,26 @@ function fileThumbURL(file){
 }
 function asCsv(data){
   const rows = [
-    ["filename","score","threshold","is_anomaly","num_polygons","area_total_px","overlay_url"]
+    ["filename","score","threshold","is_anomaly","num_polygons","area_total_px","area_max_px","iou","overlay_url"]
   ];
   data.results.forEach(r=>{
+    const polyAreas = r.polygon_areas_px || [];
+    const areaTotal = (r.total_defect_area_px != null)
+      ? Math.round(r.total_defect_area_px)
+      : totalArea(polyAreas);
+    const areaMax = (r.max_defect_area_px != null)
+      ? Math.round(r.max_defect_area_px)
+      : (polyAreas.length ? Math.round(Math.max(...polyAreas)) : 0);
+    const iouStr = (r.iou != null) ? r.iou : '';
     rows.push([
       r.filename,
       r.score,
       r.threshold,
       r.is_anomaly ? 1 : 0,
       (r.polygons || []).length,
-      totalArea(r.polygon_areas_px || []),
+      areaTotal,
+      areaMax,
+      iouStr,
       r.overlay_url || ""
     ]);
   });
@@ -188,7 +214,7 @@ downloadCsvBtn.addEventListener('click', ()=>{
   URL.revokeObjectURL(url);
 });
 
-// analizar
+// analizar lote
 analyzeBtn.addEventListener('click', async ()=>{
   if(selectedFiles.length === 0){
     alert('Selecciona imágenes o carpeta.');
@@ -199,7 +225,6 @@ analyzeBtn.addEventListener('click', async ()=>{
   const fd = new FormData();
   selectedFiles.forEach(f => fd.append('files', f));
 
-  // umbral y modo
   if(thrManual.checked && thrValue.value) fd.append('thr', thrValue.value);
   if(modeSel.value) fd.append('mode', modeSel.value);
 
@@ -228,27 +253,47 @@ function renderResults(data, files){
   setKPIs(data.summary);
 
   // Tabla
-  resultsTable.innerHTML = data.results.map(r => `
-    <tr>
-      <td>${r.filename}</td>
-      <td>${r.score.toFixed(6)}</td>
-      <td>${Number(r.threshold).toFixed(6)}</td>
-      <td>${formatStateCell(r.is_anomaly)}</td>
-      <td>${(r.polygons || []).length}</td>
-      <td>${totalArea(r.polygon_areas_px || [])}</td>
-      <td>${r.overlay_url ? `<a class="link" href="${r.overlay_url}" target="_blank">Ver</a>` : '-'}</td>
-    </tr>
-  `).join('');
+  resultsTable.innerHTML = data.results.map(r => {
+    const polyAreas = r.polygon_areas_px || [];
+    const areaTotal = (r.total_defect_area_px != null)
+      ? Math.round(r.total_defect_area_px)
+      : totalArea(polyAreas);
+    const areaMax = (r.max_defect_area_px != null)
+      ? Math.round(r.max_defect_area_px)
+      : (polyAreas.length ? Math.round(Math.max(...polyAreas)) : 0);
+    const iouStr = (r.iou != null) ? r.iou.toFixed(3) : '-';
+
+    return `
+      <tr>
+        <td>${r.filename}</td>
+        <td>${r.score.toFixed(6)}</td>
+        <td>${Number(r.threshold).toFixed(6)}</td>
+        <td>${formatStateCell(r.is_anomaly)}</td>
+        <td>${(r.polygons || []).length}</td>
+        <td>${areaTotal}</td>
+        <td>${areaMax}</td>
+        <td>${iouStr}</td>
+        <td>${r.overlay_url ? `<a class="link" href="${r.overlay_url}" target="_blank">Ver</a>` : '-'}</td>
+      </tr>
+    `;
+  }).join('');
 
   // Grid (galería)
-  // Mapeo rápido filename->File para previews
   const fileMap = new Map();
   files.forEach(f => fileMap.set(f.name, f));
   gridView.innerHTML = data.results.map(r=>{
     const f = fileMap.get(r.filename);
     const thumb = f ? fileThumbURL(f) : '';
     const polyCount = (r.polygons || []).length;
-    const areaSum = totalArea(r.polygon_areas_px || []);
+    const polyAreas = r.polygon_areas_px || [];
+    const areaTotal = (r.total_defect_area_px != null)
+      ? Math.round(r.total_defect_area_px)
+      : totalArea(polyAreas);
+    const areaMax = (r.max_defect_area_px != null)
+      ? Math.round(r.max_defect_area_px)
+      : (polyAreas.length ? Math.round(Math.max(...polyAreas)) : 0);
+    const iouStr = (r.iou != null) ? r.iou.toFixed(3) : '-';
+
     return `
       <article class="card-img">
         ${thumb ? `<img class="thumb" src="${thumb}" alt="${r.filename}"/>` : ''}
@@ -258,12 +303,137 @@ function renderResults(data, files){
             ${r.overlay_url ? `<a class="link" href="${r.overlay_url}" target="_blank">Overlay</a>` : ''}
           </div>
           <div class="meta">score=<b>${r.score.toFixed(6)}</b> • thr=${Number(r.threshold).toFixed(6)}</div>
-          <div class="meta">polígonos=${polyCount} • área total=${areaSum}px</div>
+          <div class="meta">polígonos=${polyCount} • área total=${areaTotal}px • área máx=${areaMax}px</div>
+          <div class="meta">IoU=${iouStr}</div>
           <div class="meta">${r.filename}</div>
         </div>
       </article>
     `;
   }).join('');
+}
+
+// --- Cámara en tiempo real --- //
+async function startCamera(){
+  if(cameraStream) return;
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    alert('La cámara no está soportada en este navegador.');
+    return;
+  }
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
+    cameraStream = stream;
+    cameraVideo.srcObject = stream;
+    cameraPanel.classList.remove('hidden');
+    cameraToggleBtn.textContent = 'Detener cámara';
+
+    cameraIntervalId = setInterval(captureFrameAndPredict, CAMERA_INTERVAL_MS);
+  }catch(err){
+    alert('No se pudo acceder a la cámara: ' + err.message);
+  }
+}
+
+function stopCamera(){
+  if(cameraIntervalId){
+    clearInterval(cameraIntervalId);
+    cameraIntervalId = null;
+  }
+  if(cameraStream){
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }
+  cameraVideo.srcObject = null;
+  cameraToggleBtn.textContent = 'Activar cámara';
+  cameraPanel.classList.add('hidden');
+
+  camScore.textContent = '0.000';
+  camAreaTotal.textContent = '0';
+  camState.textContent = '-';
+  camState.style.color = '';
+  camIoU.textContent = '-';
+  cameraOverlayImg.removeAttribute('src');
+}
+
+function makeCameraFilename(){
+  const now = new Date();
+  // yyyyMMdd_HHmmssfff
+  const pad = (n, l=2) => n.toString().padStart(l,'0');
+  const y = now.getFullYear();
+  const M = pad(now.getMonth()+1);
+  const d = pad(now.getDate());
+  const h = pad(now.getHours());
+  const m = pad(now.getMinutes());
+  const s = pad(now.getSeconds());
+  const ms = pad(now.getMilliseconds(),3);
+  return `camera_${y}${M}${d}_${h}${m}${s}${ms}.jpg`;
+}
+
+async function captureFrameAndPredict(){
+  if(!cameraStream || cameraBusy || !cameraVideo.videoWidth) return;
+  cameraBusy = true;
+
+  try{
+    const canvas = document.createElement('canvas');
+    canvas.width = cameraVideo.videoWidth;
+    canvas.height = cameraVideo.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(cameraVideo, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+    if(!blob) return;
+
+    const filename = makeCameraFilename();
+    const fd = new FormData();
+    fd.append('file', new File([blob], filename, { type:'image/jpeg' }));
+
+    const params = new URLSearchParams();
+    params.append('source', 'camera');
+    if(thrManual.checked && thrValue.value) params.append('thr', thrValue.value);
+    if(modeSel.value) params.append('mode', modeSel.value);
+
+    const resp = await fetch(`/predict?${params.toString()}`, {
+      method:'POST',
+      body: fd
+    });
+    if(!resp.ok) throw new Error('Error del servidor en cámara');
+    const data = await resp.json();
+
+    jsonBox.textContent = JSON.stringify(data, null, 2);
+
+    const score = data.score ?? 0;
+    const polyAreas = data.polygon_areas_px || [];
+    const areaTotal = (data.total_defect_area_px != null)
+      ? Math.round(data.total_defect_area_px)
+      : totalArea(polyAreas);
+    const iouVal = data.iou;
+
+    camScore.textContent = score.toFixed(3);
+    camAreaTotal.textContent = areaTotal;
+    camState.textContent = data.is_anomaly ? 'ANOMALÍA' : 'NORMAL';
+    camState.style.color = data.is_anomaly ? 'var(--danger)' : 'var(--ok)';
+    camIoU.textContent = (iouVal != null) ? iouVal.toFixed(3) : '-';
+
+    if(data.overlay_url){
+      // cache-busting para ver siempre el último overlay
+      cameraOverlayImg.src = `${data.overlay_url}?t=${Date.now()}`;
+    }else{
+      cameraOverlayImg.removeAttribute('src');
+    }
+  }catch(err){
+    console.error(err);
+  }finally{
+    cameraBusy = false;
+  }
+}
+
+// botón de la cámara
+if(cameraToggleBtn){
+  cameraToggleBtn.addEventListener('click', ()=>{
+    if(cameraStream){
+      stopCamera();
+    }else{
+      startCamera();
+    }
+  });
 }
 
 // --- health/config ---
@@ -280,6 +450,10 @@ function renderResults(data, files){
   updateButtons();
   setView('grid');
 
-  // habilitar número al pasar a "manual"
   thrValue.disabled = !thrManual.checked;
+
+  if(cameraToggleBtn && (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)){
+    cameraToggleBtn.disabled = true;
+    cameraToggleBtn.textContent = 'Cámara no soportada';
+  }
 })();
