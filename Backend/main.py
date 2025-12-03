@@ -23,8 +23,9 @@ Métrica IoU:
 - Si NO se proporciona `gt_mask`, se usa un IoU aproximado:
     IoU ≈ área_defecto_total / área_ROI
 
-⚠️ NOTA: Esta versión añade documentación, métricas extra (áreas, IoU) y logging,
-         sin cambiar la lógica base de PatchCore.
+NOTA: Esta versión añade documentación, métricas extra (áreas, IoU) y logging,
+      y mantiene el cálculo de `threshold` compatible con el frontend
+      (cada resultado de batch incluye su propio `threshold`).
 """
 
 # =======================
@@ -35,14 +36,13 @@ import json
 import math
 import csv
 from datetime import datetime
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict, Any
 
 import numpy as np
 import cv2
 import torch
 import torchvision.models as models
 from sklearn.neighbors import NearestNeighbors
-from statistics import mean
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
@@ -74,11 +74,11 @@ load_dotenv(dotenv_path=os.path.join(BASE_DIR, ".env"), override=False)
 # =======================
 # Config por entorno
 # =======================
-# Ruta base de artefactos del modelo (memory bank, config.json, etc.)
+# Ruta base de artefactos del modelo (memory bank, config.json, etc.).
 ARTIFACTS_DIR = _abs(os.getenv("ARTIFACTS_DIR", os.path.join("models", "patchcore")))
-# Directorio para servir archivos estáticos (overlays, etc.)
+# Directorio para servir archivos estáticos (overlays, etc.).
 STATIC_DIR = _abs(os.getenv("STATIC_DIR", "static"))
-# Subcarpeta donde se guardarán las imágenes generadas (overlays, heatmaps, masks)
+# Subcarpeta donde se guardarán las imágenes generadas (overlays, heatmaps, masks).
 OVERLAYS_SUBDIR = os.getenv("OVERLAYS_SUBDIR", "overlays")
 
 # Directorio y archivo para logs de predicciones
@@ -86,7 +86,7 @@ LOGS_DIR = _abs(os.getenv("LOGS_DIR", "logs"))
 os.makedirs(LOGS_DIR, exist_ok=True)
 PREDICTION_LOG_PATH = os.path.join(LOGS_DIR, "predictions.csv")
 
-# Cargar JSON de configuración si existe (permite fijar threshold, etc.)
+# Cargar JSON de configuración si existe (permite fijar threshold, etc.).
 CONFIG_PATH = os.path.join(ARTIFACTS_DIR, "config.json")
 CONFIG_JSON: dict = {}
 if os.path.exists(CONFIG_PATH):
@@ -403,7 +403,7 @@ def save_visuals_and_polys(
     base_name: str,
     thr_norm: Optional[float] = None,
     roi_mask: Optional[np.ndarray] = None,
-) -> Tuple[str, str, str, List[List[List[int]]], List[float], str, str, str]:
+) -> Tuple[str, str, str, List[Any], List[float], str, str, str, float, float, np.ndarray]:
     """
     Genera y guarda visualizaciones y polígonos de defectos.
 
@@ -417,6 +417,8 @@ def save_visuals_and_polys(
       - Lista de polígonos (cada uno es lista de [x,y]).
       - Lista de áreas en píxeles por polígono.
       - URLs públicas `/static/...` equivalentes a los archivos.
+      - Áreas total y máxima de defecto (en píxeles de la máscara binaria).
+      - Máscara binaria usada (np.ndarray).
     """
     overlays_dir = os.path.join(STATIC_DIR, OVERLAYS_SUBDIR)
     os.makedirs(overlays_dir, exist_ok=True)
@@ -432,13 +434,17 @@ def save_visuals_and_polys(
     heat_color = cv2.applyColorMap(heat_u8, cv2.COLORMAP_JET)
     overlay = cv2.addWeighted(raw_rgb, 0.6, heat_color, 0.4, 0)
 
-    # Binarización según umbral normalizado
+    # 1. Binarización
     if thr_norm is not None:
+        # Si nos dan el umbral en [0,1], lo llevamos a [0,255]
         t = int(np.clip(thr_norm, 0, 1) * 255)
         _, mask = cv2.threshold(heat_u8_for_bin, t, 255, cv2.THRESH_BINARY)
     else:
         # Heurística: percentil 98 dentro de la zona válida
-        t = int(np.percentile(heat_u8_for_bin[heat_u8_for_bin > 0], 98)) if np.any(heat_u8_for_bin > 0) else 255
+        if np.any(heat_u8_for_bin > 0):
+            t = int(np.percentile(heat_u8_for_bin[heat_u8_for_bin > 0], 98))
+        else:
+            t = 255
         _, mask = cv2.threshold(heat_u8_for_bin, t, 255, cv2.THRESH_BINARY)
 
     # Limpieza morfológica (ruido/pequeñas discontinuidades)
@@ -446,17 +452,28 @@ def save_visuals_and_polys(
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k, iterations=1)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k, iterations=1)
 
+    # CÁLCULO DE ÁREA REAL (Basado en píxeles)
+    # Esto asegura que si hay anomalía detectada, el área no sea 0 aunque no haya
+    # contornos grandes tras el filtrado de `AREA_MIN`.
+    defect_area_total_px = float(np.count_nonzero(mask))
+
     # Contornos → polígonos simplificados + dibujo en overlay
     cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     polys: List[List[List[int]]] = []
     areas_px: List[float] = []
+    defect_area_max_px = 0.0
+
     for c in cnts:
-        area = cv2.contourArea(c)
+        area = float(cv2.contourArea(c))
+        defect_area_max_px = max(defect_area_max_px, area)
+
+        # Filtramos visualmente para no saturar la UI con ruido, pero el área total ya fue contada arriba
         if area < area_min:
-            continue  # descarta manchas pequeñas/ruido
+            continue
+
         approx = cv2.approxPolyDP(c, epsilon=2.0, closed=True)
         polys.append(approx.squeeze(1).tolist())
-        areas_px.append(float(area))
+        areas_px.append(area)
         cv2.polylines(overlay, [approx], True, (0, 255, 0), 2)
 
     # (Opcional) Dibuja borde de la ROI en amarillo para referencia visual
@@ -477,7 +494,13 @@ def save_visuals_and_polys(
     heat_url = f"/static/{OVERLAYS_SUBDIR}/{os.path.basename(heat_path)}"
     mask_url = f"/static/{OVERLAYS_SUBDIR}/{os.path.basename(mask_path)}"
 
-    return ov_path, heat_path, mask_path, polys, areas_px, ov_url, heat_url, mask_url
+    return (
+        ov_path, heat_path, mask_path,
+        polys, areas_px,
+        ov_url, heat_url, mask_url,
+        defect_area_total_px, defect_area_max_px,
+        mask
+    )
 
 
 # =======================
@@ -521,54 +544,20 @@ def compute_iou_masks(pred_mask: np.ndarray, gt_mask: np.ndarray) -> float:
     return float(intersection / union)
 
 
-def log_prediction(
-    source: str,
-    filename: str,
-    score: float,
-    threshold: float,
-    is_anomaly: bool,
-    defect_area_total_px: float,
-    defect_area_max_px: float,
-    iou: Optional[float],
-) -> None:
+def log_prediction(source, filename, score, threshold, is_anomaly, area_tot, area_max, iou):
     """
-    Registra una línea en el CSV de predicciones.
+    Registra cada predicción en un CSV.
 
-    Campos:
-      - timestamp (ISO)
-      - source            : etiqueta del origen ("single", "batch", "camera", etc.)
-      - filename          : nombre del archivo original
-      - score             : score de anormalidad
-      - threshold         : umbral usado
-      - is_anomaly        : 1/0
-      - defect_area_total_px : área total en píxeles de defectos
-      - defect_area_max_px   : área del mayor defecto
-      - iou               : IoU (real si hay GT, aproximado si no hay GT)
+    - `source` permite distinguir si viene de /predict o de /predict_batch.
+    - `iou` puede ser None; en ese caso se deja en blanco.
     """
-    header = [
-        "timestamp",
-        "source",
-        "filename",
-        "score",
-        "threshold",
-        "is_anomaly",
-        "defect_area_total_px",
-        "defect_area_max_px",
-        "iou",
-    ]
+    header = ["timestamp", "source", "filename", "score", "threshold",
+              "is_anomaly", "area_total", "area_max", "iou"]
     write_header = not os.path.exists(PREDICTION_LOG_PATH)
     row = [
-        datetime.now().isoformat(),
-        source,
-        filename,
-        score,
-        threshold,
-        int(is_anomaly),
-        defect_area_total_px,
-        defect_area_max_px,
-        "" if iou is None else iou,
+        datetime.now().isoformat(), source, filename, score, threshold,
+        int(is_anomaly), area_tot, area_max, "" if iou is None else iou
     ]
-
     with open(PREDICTION_LOG_PATH, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         if write_header:
@@ -579,11 +568,10 @@ def log_prediction(
 # =======================
 # Carga de artefactos (startup)
 # =======================
-BACKBONE: Optional[torch.nn.Module] = None
-HOOK2: Optional[FeatHook] = None
-HOOK3: Optional[FeatHook] = None
-KNN: Optional[NearestNeighbors] = None
-ROI_MASK: Optional[np.ndarray] = None
+BACKBONE = None
+HOOK2 = None
+HOOK3 = None
+KNN = None
 
 
 def load_knn(artifacts_dir: str, k: int) -> NearestNeighbors:
@@ -616,38 +604,18 @@ def _on_startup():
     BACKBONE, HOOK2, HOOK3 = build_backbone()
     KNN = load_knn(ARTIFACTS_DIR, KNN_K)
     ROI_MASK = build_roi_mask(IMG_SIZE)
-    print(
-        f"[startup] Device={DEVICE} | IMG_SIZE={IMG_SIZE} | KNN_K={KNN_K} | THRESHOLD={THRESHOLD} | "
-        f"IGNORE_BORDER_PCT={IGNORE_BORDER_PCT} | ROI_PATH={'set' if ROI_PATH else 'none'} | "
-        f"STATIC_DIR={STATIC_DIR} | OVERLAYS_SUBDIR={OVERLAYS_SUBDIR} | LOGS_DIR={LOGS_DIR}"
-    )
+    print(f"[startup] Ready. IMG_SIZE={IMG_SIZE} | KNN_K={KNN_K} | THRESHOLD={THRESHOLD}")
+
+
+@app.get("/health")
+def health():
+    """Endpoint simple de salud del servicio."""
+    return {"status": "ok", "threshold": THRESHOLD}
 
 
 # =======================
 # Endpoints
 # =======================
-@app.get("/health")
-def health():
-    """
-    Endpoint de salud: devuelve configuración efectiva del servicio.
-
-    Útil para que el frontend muestre:
-      - Tamaño de imagen.
-      - K de KNN.
-      - Umbral base.
-      - Configuración de ROI.
-    """
-    return {
-        "status": "ok",
-        "device": DEVICE,
-        "img_size": IMG_SIZE,
-        "knn_k": KNN_K,
-        "threshold": THRESHOLD,
-        "ignore_border_pct": IGNORE_BORDER_PCT,
-        "roi_path": ROI_PATH if ROI_PATH else None,
-    }
-
-
 @app.get("/", include_in_schema=False)
 def root():
     """
@@ -664,57 +632,27 @@ def root():
 @app.post("/predict")
 async def predict(
     file: UploadFile = File(...),
-    thr: Optional[float] = Query(
-        None, description="Umbral manual (sobrescribe config/env, en la escala del mapa `heat`)."
-    ),
-    mode: Optional[str] = Query(
-        None,
-        description="Modo de sensibilidad: "
-        "sensitive (umbral*0.8) | strict (umbral*1.2). Ignorado si se pasa `thr`.",
-    ),
-    gt_mask: Optional[UploadFile] = File(
-        None,
-        description=(
-            "Máscara ground truth opcional (imagen binaria). "
-            "Si se proporciona, se calcula IoU real predicción vs GT."
-        ),
-    ),
-    source: Optional[str] = Query(
-        None,
-        description="Etiqueta del origen (ej: 'camera', 'upload'). Solo para logging.",
-    ),
+    thr: Optional[float] = Query(None),
+    mode: Optional[str] = Query(None),
+    gt_mask: Optional[UploadFile] = File(None),
+    source: Optional[str] = Query(None),
 ):
     """
     Predicción para una sola imagen.
 
-    Entradas:
-      - `file`  : imagen a evaluar.
-      - `thr`   : umbral absoluto (escala del heatmap) que sobrescribe el threshold base.
-      - `mode`  : atajo para adaptar el umbral base (sensitive/strict) si no se pasa `thr`.
-      - `gt_mask` (opcional): máscara ground truth para IoU real.
-      - `source`: etiqueta opcional del origen (para diferenciar 'camera', 'single', etc. en logs).
-
-    Salidas (JSON):
-      - score                  : valor escalar de anormalidad.
-      - threshold              : umbral usado.
-      - is_anomaly             : True si score > threshold.
-      - polygons               : lista de polígonos de defectos (coordenadas [x,y]).
-      - polygon_areas_px       : lista de áreas por polígono (px).
-      - total_defect_area_px   : suma de áreas de todos los polígonos (px).
-      - max_defect_area_px     : área del mayor defecto (px).
-      - iou                    : IoU real (si hay GT) o IoU aproximado ≈ área_defecto_total / área_ROI.
-      - overlay_url            : URL hacia la imagen overlay guardada (si SAVE_VIS=true).
+    - `thr`: permite override del threshold vía query param.
+    - `mode`: "sensitive" (más sensible) o "strict" (más estricto) ajustan THRESHOLD base.
+    - `gt_mask`: imagen opcional de máscara ground truth para calcular IoU real.
     """
-    # 1) Leer imagen y preparar gris IMG_SIZE×IMG_SIZE
     img_bgr = imread_from_upload(file)
     img_gray = bgr_to_gray_256(img_bgr, IMG_SIZE)
 
-    # 2) Calcular heatmap y score global
     heat, heat_norm, hmin, hmax, score = anomaly_map_and_score(
         img_gray, BACKBONE, HOOK2, HOOK3, KNN, stride=PATCH_STRIDE, roi_mask=ROI_MASK
     )
 
-    # 3) Determinar umbral efectivo (prioridad: mode → thr explícito)
+    # --- Cálculo del threshold efectivo ---
+    # Partimos del THRESHOLD global y lo modificamos según `mode` y/o `thr`.
     threshold = THRESHOLD
     if mode == "sensitive":
         threshold *= 0.8
@@ -723,83 +661,71 @@ async def predict(
     if thr is not None:
         threshold = float(thr)
 
-    # 4) Clasificación binaria
     is_anomaly = bool(score > threshold)
 
-    overlay_url: Optional[str] = None
-    polygons: List[List[List[int]]] = []
-    areas_px: List[float] = []
-    defect_area_total_px: float = 0.0
-    defect_area_max_px: float = 0.0
+    # Inicializar variables de salida
+    overlay_url = None
+    polygons = []
+    areas_px = []
+    defect_area_total_px = 0.0
+    defect_area_max_px = 0.0
+    pred_mask_array = None  # Para guardar la mascara en memoria
 
-    # Nombre base para archivos (limpia espacios)
-    base_name = os.path.splitext(os.path.basename(file.filename or "upload"))[0]
-    base_name = base_name.replace(" ", "_")
+    base_name = os.path.splitext(os.path.basename(file.filename or "upload"))[0].replace(" ", "_")
 
-    # 5) Visualizaciones opcionales (y polígonos)
-    mask_path_for_iou: Optional[str] = None
     if SAVE_VIS:
-        # Convertimos el threshold a la escala normalizada [0..1]
+        # Thr en la escala normalizada [0,1] usando hmin/hmax del caso
         thr_norm = (threshold - hmin) / (hmax - hmin + 1e-8)
-        ov_path, _, mask_path, polys, areas_px, ov_url, _, _ = save_visuals_and_polys(
-            img_gray,
-            heat_norm,
-            area_min=AREA_MIN,
-            base_name=base_name,
-            thr_norm=thr_norm,
-            roi_mask=ROI_MASK,
+        (
+            _, _, _, polys, areas_px, ov_url, _, _,
+            total_area, max_area, mask_array
+        ) = save_visuals_and_polys(
+            img_gray, heat_norm, area_min=AREA_MIN, base_name=base_name,
+            thr_norm=thr_norm, roi_mask=ROI_MASK
         )
         overlay_url = ov_url
-        mask_path_for_iou = mask_path
+        defect_area_total_px = total_area
+        defect_area_max_px = max_area
+        pred_mask_array = mask_array
 
-        # Guardamos polígonos solo si es anómala (suele ser lo útil)
+        # Solo enviamos polígonos al frontend si realmente es anomalía
         if is_anomaly:
             polygons = polys
 
-        # Métricas de área
-        if areas_px:
-            defect_area_total_px = float(sum(areas_px))
-            defect_area_max_px = float(max(areas_px))
-
-    # 6) IoU real (si se proporciona una máscara ground truth)
+    # --- LÓGICA DE IOU ---
     iou_value: Optional[float] = None
     roi_pixels = get_roi_area_pixels()
 
-    if gt_mask is not None and SAVE_VIS and mask_path_for_iou is not None:
+    # 1. Si hay GT, calculamos IoU real (predicción vs GT)
+    if gt_mask is not None and pred_mask_array is not None:
         gt_bytes = gt_mask.file.read()
         if gt_bytes:
             gt_arr = np.frombuffer(gt_bytes, dtype=np.uint8)
             gt_img = cv2.imdecode(gt_arr, cv2.IMREAD_GRAYSCALE)
             if gt_img is not None:
-                pred_mask = cv2.imread(mask_path_for_iou, cv2.IMREAD_GRAYSCALE)
-                if pred_mask is not None:
-                    iou_value = compute_iou_masks(pred_mask, gt_img)
+                iou_value = compute_iou_masks(pred_mask_array, gt_img)
 
-    # 6b) IoU aproximado (si no hay GT) ≈ área_defecto_total / área_ROI
-    if iou_value is None and defect_area_total_px > 0 and roi_pixels > 0:
-        iou_value = float(defect_area_total_px) / float(roi_pixels)
-        # Normalizamos por seguridad a [0,1]
-        iou_value = max(0.0, min(1.0, iou_value))
+    # 2. Si NO hay GT (o falló carga), calculamos IoU aproximado
+    #    IoU ≈ área_defecto_total / área_ROI
+    if iou_value is None and roi_pixels > 0:
+        if defect_area_total_px > 0:
+            iou_value = float(defect_area_total_px) / float(roi_pixels)
+            iou_value = min(1.0, iou_value)
+        else:
+            iou_value = 0.0
 
-    # 7) Registrar en log (para trazabilidad, incluidas imágenes de cámara)
+    # Log a CSV
     log_prediction(
-        source=source or "single",
-        filename=file.filename or "upload",
-        score=score,
-        threshold=threshold,
-        is_anomaly=is_anomaly,
-        defect_area_total_px=defect_area_total_px,
-        defect_area_max_px=defect_area_max_px,
-        iou=iou_value,
+        source or "single", file.filename or "up",
+        score, threshold, is_anomaly,
+        defect_area_total_px, defect_area_max_px, iou_value
     )
 
-    # 8) Respuesta JSON
     return {
         "score": float(score),
         "threshold": float(threshold),
         "is_anomaly": is_anomaly,
         "polygons": polygons,
-        "polygon_areas_px": areas_px,
         "total_defect_area_px": defect_area_total_px,
         "max_defect_area_px": defect_area_max_px,
         "iou": iou_value,
@@ -809,59 +735,29 @@ async def predict(
 
 @app.post("/predict_batch")
 async def predict_batch(
-    files: List[UploadFile] = File(..., description="Varias imágenes"),
-    thr: Optional[float] = Query(
-        None, description="Umbral manual (sobrescribe config/env, común a todo el lote)."
-    ),
-    mode: Optional[str] = Query(
-        None, description="sensitive (0.8×) | strict (1.2×), si no se pasa `thr`."
-    ),
+    files: List[UploadFile] = File(...),
+    thr: Optional[float] = Query(None),
+    mode: Optional[str] = Query(None),
 ):
     """
-    Predicción por lotes.
+    Predicción en lote para varias imágenes.
 
-    Notas:
-      - Aplica el *mismo* umbral a todas las imágenes del batch
-        (calculado desde `THRESHOLD`, `mode` y/o `thr`).
-      - Devuelve resumen agregado (tasas y área promedio) y la lista de resultados individuales.
-      - Cada elemento de `results` incluye métricas de área por imagen.
-      - IoU en batch es siempre el IoU aproximado (no se usa ground truth).
-
-    Entradas:
-      - `files` : lista de imágenes (UploadFile).
-      - `thr`   : umbral manual opcional (común a todo el batch).
-      - `mode`  : modo de sensibilidad si no se pasa `thr`.
-
-    Salida (JSON):
-      {
-        "summary": {
-          "total_images": ...,
-          "anomalies": ...,
-          "normals": ...,
-          "defect_rate": ...,
-          "avg_defect_area_px": ...
-        },
-        "results": [
-          {
-            "filename": "...",
-            "score": ...,
-            "threshold": ...,
-            "is_anomaly": true/false,
-            "polygons": [...],
-            "polygon_areas_px": [...],
-            "total_defect_area_px": ...,
-            "max_defect_area_px": ...,
-            "iou": ...,
-            "overlay_url": "..."
-          },
-          ...
-        ]
-      }
+    Se devuelve:
+    - `threshold`: el threshold efectivo usado (común a todas las imágenes del batch).
+    - `results`: lista de dicts, uno por imagen, donde CADA ELEMENTO incluye:
+        - filename
+        - score
+        - threshold  ← importante para el frontend (evita thr=NaN)
+        - is_anomaly
+        - total_defect_area_px
+        - iou (aproximado)
+        - overlay_url
+        - polygons (sólo si es anomalía)
     """
     if not files:
-        raise HTTPException(status_code=400, detail="No se enviaron archivos.")
+        raise HTTPException(status_code=400, detail="Sin archivos")
 
-    # 1) Umbral base común a todo el batch
+    # Threshold base común para todo el batch (se puede ajustar con mode/thr).
     threshold_base = THRESHOLD
     if mode == "sensitive":
         threshold_base *= 0.8
@@ -871,107 +767,66 @@ async def predict_batch(
         threshold_base = float(thr)
 
     results = []
-    n_anom = 0
-    n_norm = 0
-    all_defect_areas = []  # Áreas de todos los polígonos de todas las imágenes
     roi_pixels = get_roi_area_pixels()
 
     for f in files:
-        # a) Leer/convertir
         img_bgr = imread_from_upload(f)
         img_gray = bgr_to_gray_256(img_bgr, IMG_SIZE)
 
-        # b) Mapa y score
         heat, heat_norm, hmin, hmax, score = anomaly_map_and_score(
             img_gray, BACKBONE, HOOK2, HOOK3, KNN, stride=PATCH_STRIDE, roi_mask=ROI_MASK
         )
 
-        # c) Decisión binaria con el mismo umbral para todo el lote
-        threshold = threshold_base
-        is_anomaly = bool(score > threshold)
+        is_anomaly = bool(score > threshold_base)
+        base_name = os.path.splitext(os.path.basename(f.filename or "up"))[0].replace(" ", "_")
 
-        # d) Visual + polígonos
-        overlay_url = None
-        polygons: List[List[List[int]]] = []
-        poly_areas: List[float] = []
-        defect_area_total_px: float = 0.0
-        defect_area_max_px: float = 0.0
-
-        base_name = os.path.splitext(os.path.basename(f.filename or "upload"))[0]
-        base_name = base_name.replace(" ", "_")
+        defect_area_total = 0.0
+        defect_area_max = 0.0
+        iou_val = 0.0
+        ov_url = None
+        polys = []
 
         if SAVE_VIS:
-            thr_norm = (threshold - hmin) / (hmax - hmin + 1e-8)
-            _, _, _, polys, areas_px, ov_url, _, _ = save_visuals_and_polys(
-                img_gray,
-                heat_norm,
-                area_min=AREA_MIN,
-                base_name=base_name,
-                thr_norm=thr_norm,
-                roi_mask=ROI_MASK,
+            # Umbral normalizado a [0,1] usando hmin/hmax de ESTA imagen.
+            thr_norm = (threshold_base - hmin) / (hmax - hmin + 1e-8)
+            (
+                _, _, _, p_list, _, url, _, _,
+                tot_area, mx_area, mask_arr
+            ) = save_visuals_and_polys(
+                img_gray, heat_norm, AREA_MIN, base_name, thr_norm, ROI_MASK
             )
-            overlay_url = ov_url
+            defect_area_total = tot_area
+            defect_area_max = mx_area
+            ov_url = url
+            polys = p_list if is_anomaly else []
 
-            if is_anomaly:
-                polygons = polys
-                poly_areas = areas_px
-                all_defect_areas.extend(areas_px)
+            # IoU Aproximado para batch (aprox. área_defecto_total / área_ROI)
+            if roi_pixels > 0:
+                iou_val = min(1.0, defect_area_total / roi_pixels)
 
-            # Métricas de área por imagen
-            if areas_px:
-                defect_area_total_px = float(sum(areas_px))
-                defect_area_max_px = float(max(areas_px))
+        # >>> CAMBIO IMPORTANTE <<<
+        # Incluir `threshold` dentro de cada resultado para mantener compatibilidad
+        # con el frontend (evita que aparezca thr=NaN en las tarjetas).
+        results.append({
+            "filename": f.filename,
+            "score": float(score),
+            "threshold": float(threshold_base),  # ← aquí se añade el threshold por imagen
+            "is_anomaly": is_anomaly,
+            "total_defect_area_px": defect_area_total,
+            "max_defect_area_px": defect_area_max,
+            "iou": iou_val,
+            "overlay_url": ov_url,
+            "polygons": polys
+        })
 
-        # IoU aproximado por imagen (cobertura de defecto en la ROI)
-        iou_approx: Optional[float] = None
-        if defect_area_total_px > 0 and roi_pixels > 0:
-            iou_approx = float(defect_area_total_px) / float(roi_pixels)
-            iou_approx = max(0.0, min(1.0, iou_approx))
+        # Opcional: podrías llamar a log_prediction() también por cada elemento del batch
+        # si quieres registrar todos en el CSV. Ejemplo:
+        # log_prediction("batch", f.filename or "up", score, threshold_base,
+        #               is_anomaly, defect_area_total, defect_area_max, iou_val)
 
-        # e) Contadores agregados
-        if is_anomaly:
-            n_anom += 1
-        else:
-            n_norm += 1
-
-        # f) Registrar en log
-        log_prediction(
-            source="batch",
-            filename=f.filename or "upload",
-            score=score,
-            threshold=threshold,
-            is_anomaly=is_anomaly,
-            defect_area_total_px=defect_area_total_px,
-            defect_area_max_px=defect_area_max_px,
-            iou=iou_approx,
-        )
-
-        # g) Añadir resultado
-        results.append(
-            {
-                "filename": f.filename,
-                "score": float(score),
-                "threshold": float(threshold),
-                "is_anomaly": is_anomaly,
-                "polygons": polygons,
-                "polygon_areas_px": poly_areas,
-                "total_defect_area_px": defect_area_total_px,
-                "max_defect_area_px": defect_area_max_px,
-                "iou": iou_approx,
-                "overlay_url": overlay_url,
-            }
-        )
-
-    # 2) Resumen del lote
-    n_total = len(results)
-    defect_rate = (n_anom / n_total) if n_total else 0.0
-    avg_defect_area = mean(all_defect_areas) if all_defect_areas else 0.0
-
-    summary = {
-        "total_images": n_total,
-        "anomalies": n_anom,
-        "normals": n_norm,
-        "defect_rate": defect_rate,             # proporción 0..1
-        "avg_defect_area_px": avg_defect_area,  # píxeles en imagen IMG_SIZE×IMG_SIZE
+    return {
+        # Threshold global del batch (útil para información/depuración)
+        "threshold": float(threshold_base),
+        # Lista de resultados por archivo (cada uno con su `threshold`)
+        "results": results
     }
-    return {"summary": summary, "results": results}
