@@ -1,7 +1,11 @@
 # Documentación Completa del Backend (Aplicación Web + API de Inferencia de Anomalías)
 
 ## 1. Introducción General
-Este backend implementa una **API de inferencia de anomalías** basada en **PatchCore** sobre imágenes, construida con **FastAPI**.  
+  Este proyecto implementa un sistema completo de `detección de anomalías` en piezas industriales mediante vision artificial.
+Se compone de un *`backend de inferencia`* basado en PathCore y un *`dataset`* especializado que entrena y alimenta dicho modelo.
+
+## 1.1 Backend - API de Inferencia de Anomalías
+  Este backend implementa una **API de inferencia de anomalías** basada en **PatchCore** sobre imágenes, construida con **FastAPI**.  
 Expone endpoints para verificar el estado del sistema, servir un frontend estático y realizar predicciones de anomalía.  
 
 Internamente carga un **backbone ResNet18**, un **memory bank** (KNN sobre embeddings normalizados) y aplica opcionalmente una **Región de Interés (ROI)** junto con operaciones de visualización (overlays y polígonos).
@@ -15,10 +19,20 @@ Internamente carga un **backbone ResNet18**, un **memory bank** (KNN sobre embed
 - Decidir si es anómala en función de umbrales flexibles.  
 - *(Opcional)* Generar visualizaciones y polígonos de áreas anómalas para el frontend.
 
+
+## 1.2 Dataset
+  El dataset utilizado se denomina `dataset_gua_crops`, contiene imágenes reales de piezas plásticas realizadas por *`Antolin`* para tareas de inspección. Este dataset es el núcleo que alimenta el modelo PatchCore.
+
+### Objetivo del dataset
+
+  El propósito del dataset es entrenar y validar el modelo, de manera que pueda aprender el comportamiento normal de las piezas y detectar cualquier desviación como anomalía. Así, el sistema contribuye a:
+*  Reducir desperdicio en fabricación.
+*  Mejorar el control de calidad.
+  
 ---
 
 ## 2. Arquitectura General
-En esta parte se detalla cómo están organizados los componentes internos del sistema y cómo interactúan entre sí.
+  En esta parte se detalla cómo están organizados los componentes internos del sistema y cómo interactúan entre sí.
 
 **Componentes clave:**
 - **FastAPI** → Servidor HTTP que recibe las peticiones (por ejemplo, `/predict`) y además genera automáticamente la documentación de la API (Swagger/OpenAPI).  
@@ -65,7 +79,7 @@ En esta parte se detalla cómo están organizados los componentes internos del s
 ---
 
 ## 3. Estructura de Directorios
-Aquí se explica cómo está distribuido el código fuente dentro del proyecto. Cada carpeta y archivo tiene un propósito claro dentro del backend (carga de modelos, visualización, templates, etc.).
+  Aquí se explica cómo está distribuido el código fuente dentro del proyecto. Cada carpeta y archivo tiene un propósito claro dentro del backend (carga de modelos, visualización, templates, etc.).
 
 ```
 Backend/
@@ -89,7 +103,7 @@ Esta organización modular facilita el mantenimiento, la reproducibilidad y la i
 ---
 
 ## 4. Configuración y Variables de Entorno
-En este apartado se muestran las distintas variables que permiten adaptar el comportamiento del `backend` sin necesidad de modificar el código. Estas configuraciones controlan aspectos como la sensibilidad del modelo, la generación de visualizaciones, el uso de máscaras ROI y los límites de procesamiento.
+  En este apartado se muestran las distintas variables que permiten adaptar el comportamiento del `backend` sin necesidad de modificar el código. Estas configuraciones controlan aspectos como la sensibilidad del modelo, la generación de visualizaciones, el uso de máscaras ROI y los límites de procesamiento.
 
 **Variables (con valores por defecto si no existen en `.env`):**
 - `ARTIFACTS_DIR` (por defecto: `models/patchcore`)
@@ -125,7 +139,7 @@ Estas variables permiten ajustar el sistema de forma flexible y reproducible, si
 ---
 
 ## 5. Flujo de Inferencia Detallado
-Esta sección profundiza en todo el recorrido que sigue una imagen dentro del sistema de inferencia. Desde que se recibe y se transforma, hasta la obtención del mapa de anomalías y el resultado final. Se explican paso a paso los cálculos y operaciones que permiten al backend decidir si una imagen presenta o no una anomalía.
+  Esta sección profundiza en todo el recorrido que sigue una imagen dentro del sistema de inferencia. Desde que se recibe y se transforma, hasta la obtención del mapa de anomalías y el resultado final. Se explican paso a paso los cálculos y operaciones que permiten al backend decidir si una imagen presenta o no una anomalía.
 
 **Pasos:**
 1. **Carga y validación de archivo**: recepción (`UploadFile`), verificación de tipo MIME/tamaño y decodificación con OpenCV (manejo BGR, conversión desde BGRA o escala de grises).  
@@ -219,7 +233,7 @@ Esta sección profundiza en todo el recorrido que sigue una imagen dentro del si
 ---
 
 ## 6. Backbone y Extracción de Características
-En este punto se describe el corazón del modelo: el backbone ResNet18. Se explica cómo se aprovechan sus capas intermedias (hooks), cómo se combinan las características extraídas y por qué se usa un enfoque basado en distancias KNN sobre embeddings. El objetivo es entender cómo el sistema “aprende” a reconocer lo normal y a detectar lo que se sale de ese patrón.
+  En este punto se describe el corazón del modelo: el backbone ResNet18. Se explica cómo se aprovechan sus capas intermedias (hooks), cómo se combinan las características extraídas y por qué se usa un enfoque basado en distancias KNN sobre embeddings. El objetivo es entender cómo el sistema “aprende” a reconocer lo normal y a detectar lo que se sale de ese patrón.
 
 >**Nota:** El backbone (ResNet18) actúa como extractor de características, generando representaciones visuales en múltiples niveles de abstracción (bordes, texturas, formas), que sirven como base para los procesos posteriores de detección de anomalías.
 
@@ -240,7 +254,7 @@ Este diseño permite que el sistema aprenda lo normal de manera no supervisada y
 ---
 
 ## 7. ROI y Manejo de Bordes
-Este apartado describe el manejo de las `Regiones de Interés (ROI)`. El objetivo es permitir que el sistema se concentre en áreas relevantes de la imagen, ignorando bordes o zonas irrelevantes, con el fin de reducir falsos positivos en la detección de anomalías.
+  Este apartado describe el manejo de las `Regiones de Interés (ROI)`. El objetivo es permitir que el sistema se concentre en áreas relevantes de la imagen, ignorando bordes o zonas irrelevantes, con el fin de reducir falsos positivos en la detección de anomalías.
 
 **Mecanismos disponibles:**
 1. **Recorte de bordes (`IGNORE_BORDER_PCT`)**: crea margen ignorado. Los píxeles en esa zona se marcan como 0 en la máscara.
@@ -260,7 +274,7 @@ De esta manera, el sistema se centra únicamente en las regiones relevantes, mej
 ---
 
 ## 8. Cálculo del Mapa de Anomalía y Score
-Aquí se explica la lógica matemática que hay detrás del resultado. Se detalla cómo se construye el mapa de anomalía (heatmap), cómo se normalizan los valores y cómo se obtiene un “score” que resume la rareza de la imagen. También se describe cómo los modos “sensitive” y “strict” ajustan dinámicamente los umbrales.
+  Aquí se explica la lógica matemática que hay detrás del resultado. Se detalla cómo se construye el mapa de anomalía (heatmap), cómo se normalizan los valores y cómo se obtiene un “score” que resume la rareza de la imagen. También se describe cómo los modos “sensitive” y “strict” ajustan dinámicamente los umbrales.
 
 **Definiciones:**
 - `heat`: mapa en float32 resultante del resizing de distancias por patch.
@@ -289,7 +303,7 @@ Se utiliza para segmentar el mapa normalizado en regiones normales y anómalas, 
 ---
 
 ## 9. Visualización y Polígonos
-Esta sección introduce la generación de los resultados visuales que ayudan a interpretar las anomalías detectadas. Se explica cómo se crean los mapas de calor, las máscaras binarias, los polígonos que delimitan zonas anómalas y cómo todo esto se guarda como archivos accesibles desde el frontend.
+  Esta sección introduce la generación de los resultados visuales que ayudan a interpretar las anomalías detectadas. Se explica cómo se crean los mapas de calor, las máscaras binarias, los polígonos que delimitan zonas anómalas y cómo todo esto se guarda como archivos accesibles desde el frontend.
 
 **Proceso en `save_visuals_and_polys`:**
 1. Convierte `heat_norm` a 8 bits (0–255).
@@ -327,7 +341,7 @@ De esta manera, el sistema no solo calcula la anomalía, sino que también ofrec
 ---
 
 ## 10. Endpoints de la API
-En esta sección se documentan los diferentes endpoints que ofrece el backend. Se explica qué hace cada uno, qué parámetros acepta, qué tipo de respuestas devuelve y cómo interactuar con ellos tanto desde un navegador como desde scripts en Python o mediante CURL.
+  En esta sección se documentan los diferentes endpoints que ofrece el backend. Se explica qué hace cada uno, qué parámetros acepta, qué tipo de respuestas devuelve y cómo interactuar con ellos tanto desde un navegador como desde scripts en Python o mediante CURL.
 
 ### 10.1 GET /health
 - Método: GET
@@ -398,7 +412,7 @@ print(r.json())
 ---
 
 ## 11. Ejemplos de Uso en Diferentes Escenarios
-Aquí se presentan ejemplos prácticos que muestran cómo utilizar la API en distintos contextos: pruebas rápidas, auditorías, o ejecuciones sin visualización. Estos ejemplos ayudan a entender mejor el uso real de los endpoints y cómo aprovechar sus parámetros
+  Aquí se presentan ejemplos prácticos que muestran cómo utilizar la API en distintos contextos: pruebas rápidas, auditorías, o ejecuciones sin visualización. Estos ejemplos ayudan a entender mejor el uso real de los endpoints y cómo aprovechar sus parámetros
 
 1. **Detección flexible**  
    - Ajustar el umbral dinámicamente para una tanda de imágenes con mayor ruido: usar `mode=sensitive`.
@@ -414,7 +428,7 @@ Aquí se presentan ejemplos prácticos que muestran cómo utilizar la API en dis
 ---
 
 ## 12. Integración con Frontend
-Esta sección explica cómo el frontend se conecta con la API. Se muestra cómo se utiliza el endpoint principal para subir imágenes y visualizar los resultados, y se proponen ideas para ampliar la interfaz (como sliders de umbral o selección de modo).
+  Esta sección explica cómo el frontend se conecta con la API. Se muestra cómo se utiliza el endpoint principal para subir imágenes y visualizar los resultados, y se proponen ideas para ampliar la interfaz (como sliders de umbral o selección de modo).
 
 - `GET /` entrega `index.html` que actúa como un frontend mínimo de referencia. Este puede incluir:
   - Form para subir imagen.
@@ -431,7 +445,7 @@ De esta manera, el frontend puede ofrecer una experiencia interactiva y configur
 ---
 
 ## 13. Dependencias (requirements.txt)
-Aquí se listan las librerías principales del proyecto y se explica brevemente el papel de cada una. También se dan recomendaciones sobre la compatibilidad y fijación de versiones, especialmente para los componentes más sensibles como PyTorch y CUDA.
+  Aquí se listan las librerías principales del proyecto y se explica brevemente el papel de cada una. También se dan recomendaciones sobre la compatibilidad y fijación de versiones, especialmente para los componentes más sensibles como PyTorch y CUDA.
 
 **Dependencias principales:**
 - fastapi: framework web para construir la API.
@@ -535,7 +549,7 @@ Los tests permiten validar el correcto funcionamiento del backend.
 ---
 
 ## 15. Tests
-En este apartado se explican los tipos de pruebas recomendadas para asegurar el correcto funcionamiento del backend. Se incluyen ejemplos de tests básicos (salud, predicción, errores esperados) y sugerencias para validar casos específicos como el uso de ROI o los modos de sensibilidad.
+  En este apartado se explican los tipos de pruebas recomendadas para asegurar el correcto funcionamiento del backend. Se incluyen ejemplos de tests básicos (salud, predicción, errores esperados) y sugerencias para validar casos específicos como el uso de ROI o los modos de sensibilidad.
 
 **Casos sugeridos:**
 - Test de `/health` ⇒ respuesta 200 y campos esperados.  
@@ -561,7 +575,7 @@ def test_health(client):
 ---
 
 ## 16. Seguridad y Rendimiento
-Esta parte reúne las buenas prácticas para mantener el backend estable, rápido y seguro. Se comentan medidas como la validación de archivos, la limitación del tamaño de entrada, el cacheo de componentes y la configuración adecuada del CORS en entornos de producción.
+  Esta parte reúne las buenas prácticas para mantener el backend estable, rápido y seguro. Se comentan medidas como la validación de archivos, la limitación del tamaño de entrada, el cacheo de componentes y la configuración adecuada del CORS en entornos de producción.
 
 **Recomendaciones:**
 - **Límite de tamaño de archivo**: implementar middleware adicional para evitar cargas excesivas.  
@@ -577,7 +591,7 @@ La aplicación de estas medidas asegura un backend robusto, eficiente y seguro e
 ---
 
 ## 17. Extensiones Futuras
-Aquí se presentan ideas y líneas de mejora que podrían implementarse a futuro, como el procesamiento en lote, la autenticación, la persistencia en base de datos o la exposición de métricas de rendimiento.
+  Aquí se presentan ideas y líneas de mejora que podrían implementarse a futuro, como el procesamiento en lote, la autenticación, la persistencia en base de datos o la exposición de métricas de rendimiento.
 
 **Ideas:**
 - **Endpoint `GET /config`**: exponer metadatos adicionales (versión del memory bank, parámetros activos como `IMG_SIZE`, `knn_k`, `threshold`).  
@@ -593,7 +607,7 @@ Estas extensiones permitirían escalar el sistema, mejorar la seguridad y ofrece
 ---
 
 ## 18. Diagramas ASCII de Arquitectura
-En esta sección se muestran diagramas de texto que ayudan a visualizar la relación entre los distintos componentes del sistema. Son útiles para comprender de un vistazo cómo fluye la información desde el frontend hasta la inferencia y la respuesta.
+  En esta sección se muestran diagramas de texto que ayudan a visualizar la relación entre los distintos componentes del sistema. Son útiles para comprender de un vistazo cómo fluye la información desde el frontend hasta la inferencia y la respuesta.
 
 ### 18.1 Componentes
 ```
@@ -640,7 +654,7 @@ En esta sección se muestran diagramas de texto que ayudan a visualizar la relac
 ---
 
 ## 20. Ejemplo Completo de Ciclo de Inferencia
-Aquí se muestra un caso práctico completo, paso a paso, de cómo el backend procesa una imagen real. Permite entender de forma concreta cómo se aplican los parámetros y cómo se interpreta la respuesta final.
+  Aquí se muestra un caso práctico completo, paso a paso, de cómo el backend procesa una imagen real. Permite entender de forma concreta cómo se aplican los parámetros y cómo se interpreta la respuesta final.
 
 Dado:
 - Imagen `pieza123.png`
@@ -673,7 +687,7 @@ Este ejemplo muestra cómo los parámetros de configuración y el flujo interno 
 ---
 
 ## 21. Resumen Final
-Esta última parte condensa los puntos principales de toda la documentación. Resume el propósito del backend, su flexibilidad, la capacidad de visualización y las posibles vías de ampliación para proyectos futuros.
+  Esta última parte condensa los puntos principales de toda la documentación. Resume el propósito del backend, su flexibilidad, la capacidad de visualización y las posibles vías de ampliación para proyectos futuros.
 
 **El backend:**
 - **Core**: ofrece inferencia de anomalías eficiente con PatchCore (ResNet18 + KNN).  
