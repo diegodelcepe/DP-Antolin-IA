@@ -1,29 +1,29 @@
 
 ---
 
-# 📦 PatchCore Anomaly Inspector
+# PatchCore Anomaly Inspector
 
-### *FastAPI • Docker GPU • ResNet18 • KNN PatchCore • Web UI en tiempo real*
+### *FastAPI • Docker GPU • ResNet18 • PatchCore KNN •* 
 
-Este sistema implementa un **inspector automático de defectos** basado en el método **PatchCore** (KNN sobre *memory bank*) con extracción de características usando **ResNet-18**.
+Este proyecto implementa un sistema de **detección de anomalías** basado en **PathCore**, usando extracción de características con **ResNet-18** y un **memory bank precomputado**
 Incluye:
 
-* API de inferencia en **FastAPI** (optimizada para GPU, Docker & CUDA).
-* Web UI moderna en **HTML + JS**, con:
+* API de inferencia basada en **FastAPI**
+* Ejecución acelerada por **GPU (CUDA)** mediante Docker.
+* Web UI en **HTML + JS**, con:
 
   * Análisis por lotes.
   * Vista de galería y tabla.
   * Métricas (IoU, áreas de defecto, score).
   * Modo **cámara en tiempo real** con overlays.
 * Logging completo de predicciones (`predictions.csv`).
-* Soporte avanzado de ROI (máscaras externas + porcentaje de borde).
-* Generación de overlays, heatmaps y máscaras de defectos.
+* Soporte de **ROI** (overlays, heatmaps, máscaras y logging estructurado).
 
-Este repositorio está listo para uso en entornos industriales, POCs y pipelines de inspección de calidad.
+Está diseñado para integrarse en pipelines industriales o pruebas de concepto de inspección de calidad.
 
 ---
 
-# 📁 Estructura del proyecto
+# Estructura del proyecto
 
 ```
 docker-mvp/
@@ -33,88 +33,87 @@ docker-mvp/
 │  │   └─ memory_bank_core.npz
 │  ├─ static/
 │  │   ├─ assets/               # Frontend (CSS + JS)
-│  │   └─ overlays/             # Overlays generados (montado como volumen)
+│  │   └─ overlays/             # Overlays generados 
 │  ├─ templates/
-│  │   └─ index.html            # Interfaz web completa
+│  │   └─ index.html            # Interfaz web
 │  ├─ tests/
 │  ├─ .env                      # Configuración del backend
 │  ├─ main.py                   # FastAPI (núcleo PatchCore)
 │  └─ requirements.txt
 │
-├─ Dataset/                     # (opcional) dataset local
+├─ Dataset/                     # dataset local
 ├─ notebooks/                   
 ├─ Dockerfile.gpu
 ├─ docker-compose.yml
 └─ README.md
 ```
 
-> La carpeta `logs/` no necesita existir:
-> el backend la crea automáticamente (`LOGS_DIR`) y genera `predictions.csv`.
+> El directorio /Backend/logs/ se genera automáticamente y contiene predictions.csv
 
 ---
 
-# ⚙️ Arquitectura del Backend
-
-## 🔧 Flujo general del modelo
+# Arquitectura del Backend
 
 ### 1. Preprocesamiento
 
-* Redimensionado a `IMG_SIZE × IMG_SIZE` (por defecto: 256×256).
-* Conversión a escala de grises.
-* Replicado a 3 canales para ResNet-18.
+* Redimensionado a IMG_SIZE × IMG_SIZE (por defecto: 256×256).
+* Transformación a escala de grises.
+* Replicado a 3 canales (GRAY → BGR).
+* Conversión a BGR.
 
-### 2. Extracción de características
+### 2. Extracción de características (ResNet-18)
 
-* Backbone **ResNet-18** preentrenada.
-* Hooks en `layer2` y `layer3`.
-* Concat: `layer2 || upsample(layer3)` → mapa combinado de features.
+* Hooks en **layer2** y **layer3**.
+* layer3 se interpola para que coincida con las dimensiones de layer2.
+* Ambas se concatenan a lo largo de canales.
+
+Resultado: mapa de características combinado.
 
 ### 3. PatchCore + KNN
 
-* Patchify del feature map.
+* Patchificación del feature map.
 * Normalización L2 fila a fila (estabilidad numérica).
-* Memory bank cargado desde:
+* Búsqueda de **K vecinos más cercanos** usando sklearn.neighbors.NearestNeighbors
+* Cálculo del heatmap mediante distancia promedio al memory bank:
 
   ```
   Backend/models/patchcore/memory_bank_core.npz
   ```
-* KNN (`KNN_K` vecinos).
-* Mapa de calor = distancia promedio a K vecinos.
 
-### 4. Score global
+### 4. Score de anomalía
 
-* Reescalado del mapa de calor a 256×256.
-* Score = valor máximo del mapa:
+* Score = valor máximo del heatmap:
 
-  * Si hay ROI → máximo DENTRO de la ROI.
+  * Si existe ROI → máximo DENTRO de la ROI.
   * Si no hay ROI → máximo global.
 
 ### 5. Visualizaciones
 
-Si `SAVE_VIS=1`, se generan:
+Si `SAVE_VIS=1`, se generan en /Backend/static/overlays:
 
-* Overlay (`*_overlay.png`)
+* Overlay a color (`*_overlay.png`)
 * Heatmap (`*_heat.png`)
-* Máscara (`*_mask.png`)
+* Máscara binaria de defectos (`*_mask.png`)+
 
 ### 6. Polígonos y áreas
 
-* Detección de contornos > `AREA_MIN`.
-* Se devuelven polígonos, áreas individuales y totales.
+* Detección de contornos con OpenCV.
+* Áreas individuales y total.
+* Polígonos aproximados.
 
 ---
 
-# 🎯 ROI (Región de interés)
+# ROI (Región de interés)
 
-Sistema flexible de recorte lógico aplicado al mapa de calor:
+El sistema permite recortar la evaluación mediante dos mecanismos:
 
-### ✔️ ROI por porcentaje: `IGNORE_BORDER_PCT`
+### ROI por porcentaje de borde: `IGNORE_BORDER_PCT`
 
-Ejemplo: si vale `5`, ignora 5% del borde en cada lado.
+Ignora un borde proporcional. Ejemplo: si vale `5`, ignora 5% del borde en cada lado.
 
-### ✔️ ROI por máscara externa: `ROI_PATH`
+### ROI por máscara externa: `ROI_PATH`
 
-PNG binaria donde:
+Archivo PNG binario donde:
 
 * 255 → píxel válido
 * 0 → ignorar
@@ -123,11 +122,12 @@ Se usa para:
 
 * Score
 * Binarización del heatmap
+* Polígonos
 * IoU aproximado
 
 ---
 
-# 📊 Métrica IoU
+# Métrica IoU
 
 ### IoU real (si se envía `gt_mask`)
 
@@ -147,7 +147,7 @@ Siempre normalizado a `[0, 1]`.
 
 ---
 
-# 🧾 Logging automático (predictions.csv)
+# Logging automático
 
 Cada predicción se guarda en:
 
@@ -165,21 +165,22 @@ Incluye:
 * is_anomaly
 * defect_area_total_px
 * defect_area_max_px
-* iou
+* IoU real / aproximado
+* overlays URLs
 
 ---
 
-# 🌐 Frontend Web (UI)
+# Interfaz Web (Frontend)
 
 La interfaz web (`templates/index.html` + `static/assets/app.js`) incluye:
 
-### ✔️ Carga de imágenes
+### Carga de imágenes
 
 * Múltiples archivos
 * Carpetas completas (`webkitdirectory`)
 * Drag & Drop
 
-### ✔️ Configuración de umbral
+### Configuración de umbral
 
 * Automático (backend)
 * Manual (usuario)
@@ -189,7 +190,7 @@ La interfaz web (`templates/index.html` + `static/assets/app.js`) incluye:
   * **sensitive (0.8×)**
   * **strict (1.2×)**
 
-### ✔️ Resultados
+### Resultados
 
 * Vista **galería** (cards)
 * Vista **tabla**
@@ -197,7 +198,7 @@ La interfaz web (`templates/index.html` + `static/assets/app.js`) incluye:
 * Panel de **KPIs**:
   Total, normales, anomalías, tasa de defectos, área media.
 
-### ✔️ Modo cámara en tiempo real
+### Modo cámara en tiempo real
 
 Captura frames cada 1.5s y los envía a `/predict?source=camera`.
 Muestra:
@@ -210,7 +211,7 @@ Muestra:
 
 ---
 
-# 🔧 Variables de Entorno (Backend/.env)
+# Variables de Entorno (Backend/.env)
 
 Ejemplo:
 
@@ -240,7 +241,7 @@ ROI_PATH=
 
 ---
 
-# 🐳 Docker (GPU)
+# Ejecución con Docker
 
 ## Imagen: `Dockerfile.gpu`
 
@@ -279,9 +280,9 @@ deploy:
 
 ---
 
-# 🚀 Cómo correr el sistema
+# Construir y ejecutar
 
-### 👉 Primera vez o después de cambios en el backend
+### Primera vez o después de cambios en el backend
 
 ```bash
 docker compose up -d --build
@@ -317,9 +318,13 @@ docker compose down
 
 # 🔌 Endpoints de la API
 
+### ``GET /`
+
+Devuelve la interfaz web.
+
 ### `GET /health`
 
-Config actual del modelo.
+Configuración básica del backend.
 
 ```json
 {
@@ -331,17 +336,9 @@ Config actual del modelo.
 }
 ```
 
----
-
-### `GET /`
-
-Sirve la interfaz web (UI).
-
----
-
 ### `POST /predict`
 
-📥 Una sola imagen (opcional `gt_mask` para IoU real).
+Predicción de una sola imagen
 
 Query params:
 
@@ -353,9 +350,7 @@ Query params:
 
 ### `POST /predict_batch`
 
-📥 Múltiples imágenes.
-
-Devuelve:
+Procesa múltiples imágenes y devuelve:
 
 * summary (KPIs)
 * result por imagen
@@ -365,9 +360,9 @@ Devuelve:
 
 ---
 
-# 🧠 Notas finales
+# Notas finales
 
-* Si hay GPU, el modelo corre en **CUDA** automáticamente.
+* Si hay GPU, el modelo usa **CUDA** automáticamente.
 * El sistema está preparado para producción y uso industrial.
 * Web UI pensada para operadores, laboratorio y validación rápida.
 * Backend modular y fácil de extender mediante hooks.
