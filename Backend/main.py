@@ -747,12 +747,13 @@ async def predict_batch(
     - `results`: lista de dicts, uno por imagen, donde CADA ELEMENTO incluye:
         - filename
         - score
-        - threshold  ← importante para el frontend (evita thr=NaN)
+        - threshold
         - is_anomaly
         - total_defect_area_px
         - iou (aproximado)
         - overlay_url
         - polygons (sólo si es anomalía)
+    - `summary`: resumen para los KPIs del frontend.
     """
     if not files:
         raise HTTPException(status_code=400, detail="Sin archivos")
@@ -804,13 +805,10 @@ async def predict_batch(
             if roi_pixels > 0:
                 iou_val = min(1.0, defect_area_total / roi_pixels)
 
-        # >>> CAMBIO IMPORTANTE <<<
-        # Incluir `threshold` dentro de cada resultado para mantener compatibilidad
-        # con el frontend (evita que aparezca thr=NaN en las tarjetas).
         results.append({
             "filename": f.filename,
             "score": float(score),
-            "threshold": float(threshold_base),  # ← aquí se añade el threshold por imagen
+            "threshold": float(threshold_base),
             "is_anomaly": is_anomaly,
             "total_defect_area_px": defect_area_total,
             "max_defect_area_px": defect_area_max,
@@ -819,14 +817,26 @@ async def predict_batch(
             "polygons": polys
         })
 
-        # Opcional: podrías llamar a log_prediction() también por cada elemento del batch
-        # si quieres registrar todos en el CSV. Ejemplo:
-        # log_prediction("batch", f.filename or "up", score, threshold_base,
-        #               is_anomaly, defect_area_total, defect_area_max, iou_val)
+    # === Resumen para los KPIs del frontend ===
+    total_images = len(results)
+    anomalies = sum(1 for r in results if r["is_anomaly"])
+    normals = total_images - anomalies
+    defect_rate = float(anomalies) / float(total_images) if total_images > 0 else 0.0
+
+    # Media de área de defecto (usando total_defect_area_px)
+    areas = [r["total_defect_area_px"] for r in results]
+    avg_defect_area_px = float(sum(areas) / len(areas)) if areas else 0.0
+
+    summary = {
+        "total_images": total_images,
+        "anomalies": anomalies,
+        "normals": normals,
+        "defect_rate": defect_rate,
+        "avg_defect_area_px": avg_defect_area_px,
+    }
 
     return {
-        # Threshold global del batch (útil para información/depuración)
         "threshold": float(threshold_base),
-        # Lista de resultados por archivo (cada uno con su `threshold`)
-        "results": results
+        "results": results,
+        "summary": summary,
     }
