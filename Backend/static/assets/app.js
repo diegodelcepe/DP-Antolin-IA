@@ -401,10 +401,25 @@ function renderResults(data, files){
   // C. Renderizar GRID (Galería)
   // Mapear nombres de archivo a objetos File para obtener thumbnails
   const fileMap = new Map();
-  files.forEach(f => fileMap.set(f.name, f));
+  files.forEach(f => {
+    // nombre simple: img_2024-12-03_...
+    fileMap.set(f.name, f);
+    // ruta relativa cuando subes carpetas: CARPETA DE PRUEBA/img_...
+    if (f.webkitRelativePath) {
+      fileMap.set(f.webkitRelativePath, f);
+    }
+  });
   
   gridView.innerHTML = data.results.map(r=>{
-    const f = fileMap.get(r.filename);
+    // r.filename viene como "CARPETA DE PRUEBA/img_....png"
+    let f = fileMap.get(r.filename);
+
+    // fallback: quedarnos solo con el nombre del archivo
+    if (!f) {
+      const baseName = r.filename.split(/[\\/]/).pop();
+      f = fileMap.get(baseName);
+    }
+
     const thumb = f ? fileThumbURL(f) : ''; // Crear blob URL local
     
     // Recalcular datos para la tarjeta

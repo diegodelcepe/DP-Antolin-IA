@@ -805,8 +805,12 @@ async def predict_batch(
             if roi_pixels > 0:
                 iou_val = min(1.0, defect_area_total / roi_pixels)
 
+        # Nombre "amigable" para el frontend: solo el nombre del archivo, sin carpetas
+        orig_name = f.filename or "upload"
+        safe_name = orig_name.replace("\\", "/").split("/")[-1]
+
         results.append({
-            "filename": f.filename,
+            "filename": safe_name,  # ← ahora solo 'img_2024-12-03_....png'
             "score": float(score),
             "threshold": float(threshold_base),
             "is_anomaly": is_anomaly,
