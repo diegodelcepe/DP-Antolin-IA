@@ -744,6 +744,22 @@ async def predict_batch(
         description="Etiquetas ground truth (0=normal, 1=defectuosa) en el mismo orden que los archivos."
     ),
 ):
+    """
+    Predicción en lote para varias imágenes.
+
+    Se devuelve:
+    - `threshold`: el threshold efectivo usado (común a todas las imágenes del batch).
+    - `results`: lista de dicts, uno por imagen, donde CADA ELEMENTO incluye:
+        - filename
+        - score
+        - threshold
+        - is_anomaly
+        - total_defect_area_px
+        - iou (aproximado)
+        - overlay_url
+        - polygons (sólo si es anomalía)
+    - `summary`: resumen para los KPIs del frontend.
+    """
     if not files:
         raise HTTPException(status_code=400, detail="Sin archivos")
 
@@ -828,10 +844,14 @@ async def predict_batch(
                 else:
                     fn += 1
 
-        # ---- Guardar resultado ----
+       
+        # Nombre "amigable" para el frontend: solo el nombre del archivo, sin carpetas
+        orig_name = f.filename or "upload"
+        safe_name = orig_name.replace("\\", "/").split("/")[-1]
+
         results.append({
             "idx": idx,
-            "filename": f.filename,
+            "filename": safe_name,  # ← ahora solo 'img_2024-12-03_....png'
             "score": float(score),
             "threshold": float(threshold_base),
             "is_anomaly": is_anomaly,
@@ -842,16 +862,23 @@ async def predict_batch(
             "polygons": polys,
         })
 
-    # ---- Resumen para la UI ----
-    recall = tp / (tp + fn) if (tp + fn) > 0 else None
+
+    # === Resumen para los KPIs del frontend ===
+    total_images = len(results)
+    anomalies = sum(1 for r in results if r["is_anomaly"])
+    normals = total_images - anomalies
+    defect_rate = float(anomalies) / float(total_images) if total_images > 0 else 0.0
+
+    # Media de área de defecto (usando total_defect_area_px)
+    areas = [r["total_defect_area_px"] for r in results]
+    avg_defect_area_px = float(sum(areas) / len(areas)) if areas else 0.0
 
     summary = {
-        "total_images": n_total,
-        "anomalies": n_anom,
-        "normals": n_total - n_anom,
-        "defect_rate": n_anom / n_total if n_total > 0 else 0,
-        "avg_defect_area_px": (sum(all_defect_areas) / len(all_defect_areas)) if all_defect_areas else 0,
-        "recall": recall,
+        "total_images": total_images,
+        "anomalies": anomalies,
+        "normals": normals,
+        "defect_rate": defect_rate,
+        "avg_defect_area_px": avg_defect_area_px,
     }
 
     return {

@@ -477,10 +477,12 @@ function renderResults(data, files) {
     const safeName = normalizeName(r.filename);
 
     let f = fileMap.get(r.filename);
+
     if (!f) {
       const baseName = r.filename.split(/[\\/]/).pop();
       f = fileMap.get(baseName);
     }
+
 
     const thumb = f ? fileThumbURL(f) : "";
     const polyAreas = r.polygon_areas_px || [];
