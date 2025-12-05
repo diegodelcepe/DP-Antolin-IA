@@ -48,6 +48,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi import Form
 
 from dotenv import load_dotenv  # Carga variables desde .env si existe
 
@@ -736,28 +737,17 @@ async def predict(
 @app.post("/predict_batch")
 async def predict_batch(
     files: List[UploadFile] = File(...),
-    thr: Optional[float] = Query(None),
-    mode: Optional[str] = Query(None),
+    thr: Optional[float] = Form(None),
+    mode: Optional[str] = Form(None),
+    gt_labels: Optional[List[int]] = Form(
+        None,
+        description="Etiquetas ground truth (0=normal, 1=defectuosa) en el mismo orden que los archivos."
+    ),
 ):
-    """
-    Predicción en lote para varias imágenes.
-
-    Se devuelve:
-    - `threshold`: el threshold efectivo usado (común a todas las imágenes del batch).
-    - `results`: lista de dicts, uno por imagen, donde CADA ELEMENTO incluye:
-        - filename
-        - score
-        - threshold  ← importante para el frontend (evita thr=NaN)
-        - is_anomaly
-        - total_defect_area_px
-        - iou (aproximado)
-        - overlay_url
-        - polygons (sólo si es anomalía)
-    """
     if not files:
         raise HTTPException(status_code=400, detail="Sin archivos")
 
-    # Threshold base común para todo el batch (se puede ajustar con mode/thr).
+    # Threshold común
     threshold_base = THRESHOLD
     if mode == "sensitive":
         threshold_base *= 0.8
@@ -769,16 +759,29 @@ async def predict_batch(
     results = []
     roi_pixels = get_roi_area_pixels()
 
-    for f in files:
+    # Métricas recall
+    tp = 0
+    fn = 0
+
+    # Contadores para las métricas de la UI
+    n_total = len(files)
+    n_anom = 0
+    all_defect_areas = []
+
+    for idx, f in enumerate(files):
         img_bgr = imread_from_upload(f)
         img_gray = bgr_to_gray_256(img_bgr, IMG_SIZE)
 
         heat, heat_norm, hmin, hmax, score = anomaly_map_and_score(
-            img_gray, BACKBONE, HOOK2, HOOK3, KNN, stride=PATCH_STRIDE, roi_mask=ROI_MASK
+            img_gray, BACKBONE, HOOK2, HOOK3, KNN,
+            stride=PATCH_STRIDE, roi_mask=ROI_MASK
         )
 
         is_anomaly = bool(score > threshold_base)
-        base_name = os.path.splitext(os.path.basename(f.filename or "up"))[0].replace(" ", "_")
+        if is_anomaly:
+            n_anom += 1
+
+        base_name = os.path.splitext(f.filename)[0].replace(" ", "_")
 
         defect_area_total = 0.0
         defect_area_max = 0.0
@@ -787,46 +790,72 @@ async def predict_batch(
         polys = []
 
         if SAVE_VIS:
-            # Umbral normalizado a [0,1] usando hmin/hmax de ESTA imagen.
             thr_norm = (threshold_base - hmin) / (hmax - hmin + 1e-8)
+
             (
-                _, _, _, p_list, _, url, _, _,
-                tot_area, mx_area, mask_arr
+                _ov_path,
+                _heat_path,
+                _mask_path,
+                p_list,
+                _areas_px,
+                url,
+                _heat_url,
+                _mask_url,
+                tot_area,
+                mx_area,
+                _mask_arr,
             ) = save_visuals_and_polys(
                 img_gray, heat_norm, AREA_MIN, base_name, thr_norm, ROI_MASK
             )
+
             defect_area_total = tot_area
             defect_area_max = mx_area
             ov_url = url
-            polys = p_list if is_anomaly else []
 
-            # IoU Aproximado para batch (aprox. área_defecto_total / área_ROI)
+            if is_anomaly:
+                polys = p_list
+                all_defect_areas.append(defect_area_total)
+
             if roi_pixels > 0:
                 iou_val = min(1.0, defect_area_total / roi_pixels)
 
-        # >>> CAMBIO IMPORTANTE <<<
-        # Incluir `threshold` dentro de cada resultado para mantener compatibilidad
-        # con el frontend (evita que aparezca thr=NaN en las tarjetas).
+        # ---- Calcular Recall ----
+        if gt_labels is not None and idx < len(gt_labels):
+            gt_is_defective = bool(gt_labels[idx])
+            if gt_is_defective:
+                if is_anomaly:
+                    tp += 1
+                else:
+                    fn += 1
+
+        # ---- Guardar resultado ----
         results.append({
+            "idx": idx,
             "filename": f.filename,
             "score": float(score),
-            "threshold": float(threshold_base),  # ← aquí se añade el threshold por imagen
+            "threshold": float(threshold_base),
             "is_anomaly": is_anomaly,
             "total_defect_area_px": defect_area_total,
             "max_defect_area_px": defect_area_max,
             "iou": iou_val,
             "overlay_url": ov_url,
-            "polygons": polys
+            "polygons": polys,
         })
 
-        # Opcional: podrías llamar a log_prediction() también por cada elemento del batch
-        # si quieres registrar todos en el CSV. Ejemplo:
-        # log_prediction("batch", f.filename or "up", score, threshold_base,
-        #               is_anomaly, defect_area_total, defect_area_max, iou_val)
+    # ---- Resumen para la UI ----
+    recall = tp / (tp + fn) if (tp + fn) > 0 else None
+
+    summary = {
+        "total_images": n_total,
+        "anomalies": n_anom,
+        "normals": n_total - n_anom,
+        "defect_rate": n_anom / n_total if n_total > 0 else 0,
+        "avg_defect_area_px": (sum(all_defect_areas) / len(all_defect_areas)) if all_defect_areas else 0,
+        "recall": recall,
+    }
 
     return {
-        # Threshold global del batch (útil para información/depuración)
         "threshold": float(threshold_base),
-        # Lista de resultados por archivo (cada uno con su `threshold`)
-        "results": results
+        "results": results,
+        "summary": summary,
     }

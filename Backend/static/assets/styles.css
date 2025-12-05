@@ -245,6 +245,16 @@ tr:hover{background:rgba(255,255,255,.04)}
   font-size:11px;
 }
 
+.gtlabel {
+  margin-right: 10px;
+  font-size: 13px;
+}
+
+.gtlabel input {
+  margin-right: 4px;
+}
+
+
 /* responsive */
 @media (max-width: 1000px){
   .app{grid-template-columns:1fr}

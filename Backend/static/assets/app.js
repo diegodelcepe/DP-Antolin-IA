@@ -145,14 +145,28 @@ function setKPIs(summary){
   const total = summary?.total_images || 0;
   const anom = summary?.anomalies || 0;
   const norm = summary?.normals || 0;
-  const rate = summary?.defect_rate ? (summary.defect_rate*100).toFixed(1) : '0.0';
-  const area = summary?.avg_defect_area_px ? Math.round(summary.avg_defect_area_px) : 0;
+
+  const rate =
+    summary?.defect_rate != null
+      ? (summary.defect_rate * 100).toFixed(1)
+      : "0.0";
+
+  const area =
+    summary?.avg_defect_area_px != null
+      ? Math.round(summary.avg_defect_area_px)
+      : 0;
+
+  const recall = summary?.recall != null
+  ? (summary.recall * 100).toFixed(1) + "%"
+  : "—";
 
   kpiTotal.textContent = total;
   kpiAnom.textContent  = anom;
   kpiNorm.textContent  = norm;
   kpiRate.textContent  = `${rate}%`;
   kpiArea.textContent  = area;
+
+  kpiRecall.textContent = recall;
 }
 
 /**
@@ -322,66 +336,118 @@ downloadCsvBtn.addEventListener('click', ()=>{
 // 5. LÓGICA DE ANÁLISIS BATCH (Botón "Analizar")
 // ============================================================================
 
-analyzeBtn.addEventListener('click', async ()=>{
-  if(selectedFiles.length === 0){
-    alert('Selecciona imágenes o carpeta.');
+analyzeBtn.addEventListener("click", async () => {
+
+  if (selectedFiles.length === 0) {
+    alert("Selecciona imágenes o carpeta.");
     return;
   }
-  clearResults(); // Limpiar resultados anteriores
 
-  // 1. Construir FormData
-  const fd = new FormData();
-  selectedFiles.forEach(f => fd.append('files', f)); // Adjuntar todas las imágenes
+  clearResults();
 
-  // Adjuntar parámetros opcionales
-  if(thrManual.checked && thrValue.value) fd.append('thr', thrValue.value);
-  if(modeSel.value) fd.append('mode', modeSel.value);
-
-  // 2. UI Feedback (estado de carga)
   analyzeBtn.disabled = true;
-  analyzeBtn.textContent = 'Procesando...';
+  analyzeBtn.textContent = "Procesando...";
 
-  try{
-    // 3. Petición al Backend
-    const r = await fetch('/predict_batch', { method:'POST', body: fd });
-    if(!r.ok) throw new Error('Error del servidor');
-    
-    const data = await r.json();
-    lastBatch = data; // Guardar respuesta en memoria
+  //
+  // 1️⃣ PRIMERA LLAMADA — SIN GT
+  //
+  const fd = new FormData();
+  selectedFiles.forEach(f => fd.append("files", f));
 
-    // 4. Renderizar
-    renderResults(data, selectedFiles);
-    jsonBox.textContent = JSON.stringify(data, null, 2); // Debug info
-    updateButtons();
-  }catch(err){
-    jsonBox.textContent = `Error: ${err.message}`;
-  }finally{
-    // 5. Restaurar botón
+  if (thrManual.checked && thrValue.value) fd.append("thr", thrValue.value);
+  if (modeSel.value) fd.append("mode", modeSel.value);
+
+  try {
+    const r = await fetch("/predict_batch", {
+      method: "POST",
+      body: fd
+    });
+
+    if (!r.ok) throw new Error("Error servidor");
+
+  const data = await r.json();
+  renderResults(data, selectedFiles);
+
+  // 2️⃣ LEER GT
+  await new Promise(resolve => setTimeout(resolve, 200));
+  const gtLabels = [];
+  data.results.forEach(r => {
+      const radios = document.querySelectorAll(`input[name="gt_${r.idx}"]`);
+      let val = 0;
+      radios.forEach(rb => { if (rb.checked) val = Number(rb.value); });
+      gtLabels.push(val);
+  });
+  console.log("GT ENVIADAS:", gtLabels);
+
+    // 3️⃣ SEGUNDA LLAMADA
+  // 3️⃣ SEGUNDA LLAMADA ─ enviar también los archivos
+  const fd2 = new FormData();
+
+  selectedFiles.forEach(f => fd2.append("files", f));   // 🔥 OBLIGATORIO
+
+  if (thrManual.checked && thrValue.value) fd2.append("thr", thrValue.value);
+  if (modeSel.value) fd2.append("mode", modeSel.value);
+
+  gtLabels.forEach(v => fd2.append("gt_labels", v));
+
+  const r2 = await fetch("/predict_batch", {
+      method: "POST",
+      body: fd2
+  });
+
+  const data2 = await r2.json();
+
+
+    // 4️⃣ SOLO AHORA renderResults
+  renderResults(data2, selectedFiles);
+  jsonBox.textContent = JSON.stringify(data2, null, 2);
+
+  } catch (err) {
+    jsonBox.textContent = "⚠️ ERROR: " + err.message;
+    console.error(err);
+  } finally {
     analyzeBtn.disabled = false;
-    analyzeBtn.textContent = 'Analizar';
+    analyzeBtn.textContent = "Analizar";
   }
 });
+
+
+
 
 /**
  * Renderiza los resultados en el DOM (tanto Grid como Tabla).
  * @param {Object} data - Respuesta JSON del servidor.
  * @param {File[]} files - Archivos originales para generar thumbnails locales.
  */
-function renderResults(data, files){
-  // A. Actualizar KPIs superiores
-  setKPIs(data.summary);
 
-  // B. Renderizar TABLA
+function normalizeName(name) {
+  // Mantener letras, números, guiones, guion bajo, puntos.
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function renderResults(data, files) {
+
+  // --- A. KPIs ---
+  if (data.summary) {
+    setKPIs(data.summary);
+  } else {
+    setKPIs({
+      total_images: data.results.length,
+      anomalies: data.results.filter(r => r.is_anomaly).length,
+      normals: data.results.filter(r => !r.is_anomaly).length,
+      defect_rate: data.results.filter(r => r.is_anomaly).length / data.results.length,
+      avg_defect_area_px:
+        data.results.reduce((acc, r) => acc + (r.total_defect_area_px || 0), 0) / data.results.length,
+      recall: null
+    });
+  }
+
+  // --- B. TABLA ---
   resultsTable.innerHTML = data.results.map(r => {
-    // Cálculos de áreas para visualización
     const polyAreas = r.polygon_areas_px || [];
-    const areaTotal = (r.total_defect_area_px != null) 
-      ? Math.round(r.total_defect_area_px) 
-      : totalArea(polyAreas);
-    const areaMax = (r.max_defect_area_px != null) 
-      ? Math.round(r.max_defect_area_px) 
-      : (polyAreas.length ? Math.round(Math.max(...polyAreas)) : 0);
-    const iouStr = (r.iou != null) ? r.iou.toFixed(3) : '-';
+    const areaTotal = (r.total_defect_area_px ?? totalArea(polyAreas));
+    const areaMax = (r.max_defect_area_px ?? (polyAreas.length ? Math.max(...polyAreas) : 0));
+    const iouStr = (r.iou != null) ? r.iou.toFixed(3) : "-";
 
     return `
       <tr>
@@ -390,47 +456,76 @@ function renderResults(data, files){
         <td>${Number(r.threshold).toFixed(6)}</td>
         <td>${formatStateCell(r.is_anomaly)}</td>
         <td>${(r.polygons || []).length}</td>
-        <td>${areaTotal}</td>
-        <td>${areaMax}</td>
+        <td>${Math.round(areaTotal)}</td>
+        <td>${Math.round(areaMax)}</td>
         <td>${iouStr}</td>
         <td>${r.overlay_url ? `<a class="link" href="${r.overlay_url}" target="_blank">Ver</a>` : '-'}</td>
       </tr>
     `;
-  }).join('');
+  }).join("");
 
-  // C. Renderizar GRID (Galería)
-  // Mapear nombres de archivo a objetos File para obtener thumbnails
+  // --- C. GRID (Galería) ---
   const fileMap = new Map();
-  files.forEach(f => fileMap.set(f.name, f));
-  
-  gridView.innerHTML = data.results.map(r=>{
-    const f = fileMap.get(r.filename);
-    const thumb = f ? fileThumbURL(f) : ''; // Crear blob URL local
-    
-    // Recalcular datos para la tarjeta
-    const polyCount = (r.polygons || []).length;
+  files.forEach(f => {
+    fileMap.set(f.name, f);
+    if (f.webkitRelativePath) fileMap.set(f.webkitRelativePath, f);
+  });
+
+  gridView.innerHTML = data.results.map(r => {
+
+    //SIEMPRE LA MISMA NORMALIZACIÓN
+    const safeName = normalizeName(r.filename);
+
+    let f = fileMap.get(r.filename);
+    if (!f) {
+      const baseName = r.filename.split(/[\\/]/).pop();
+      f = fileMap.get(baseName);
+    }
+
+    const thumb = f ? fileThumbURL(f) : "";
     const polyAreas = r.polygon_areas_px || [];
-    const areaTotal = (r.total_defect_area_px != null) ? Math.round(r.total_defect_area_px) : totalArea(polyAreas);
-    const areaMax = (r.max_defect_area_px != null) ? Math.round(r.max_defect_area_px) : (polyAreas.length ? Math.round(Math.max(...polyAreas)) : 0);
-    const iouStr = (r.iou != null) ? r.iou.toFixed(3) : '-';
+    const polyCount = (r.polygons || []).length;
+    const areaTotal = Math.round(r.total_defect_area_px ?? totalArea(polyAreas));
+    const areaMax = Math.round(r.max_defect_area_px ?? (polyAreas.length ? Math.max(...polyAreas) : 0));
+    const iouStr = (r.iou != null) ? r.iou.toFixed(3) : "-";
 
     return `
       <article class="card-img">
+
         ${thumb ? `<img class="thumb" src="${thumb}" alt="${r.filename}"/>` : ''}
+
         <div class="pad">
           <div class="row">
-            <div class="state ${r.is_anomaly ? 'bad' : 'ok'}">${r.is_anomaly ? 'ANOMALÍA' : 'NORMAL'}</div>
-            ${r.overlay_url ? `<a class="link" href="${r.overlay_url}" target="_blank">Overlay</a>` : ''}
+            <div class="state ${r.is_anomaly ? "bad" : "ok"}">
+              ${r.is_anomaly ? "ANOMALÍA" : "NORMAL"}
+            </div>
+            ${r.overlay_url ? `<a class="link" href="${r.overlay_url}" target="_blank">Overlay</a>` : ""}
           </div>
+
           <div class="meta">score=<b>${r.score.toFixed(6)}</b> • thr=${Number(r.threshold).toFixed(6)}</div>
           <div class="meta">polígonos=${polyCount} • área total=${areaTotal}px • área máx=${areaMax}px</div>
           <div class="meta">IoU=${iouStr}</div>
           <div class="meta">${r.filename}</div>
+
+         <!-- Ground Truth --> 
+          <div class="meta">
+            <label class="gtlabel">
+              <input type="radio" name="gt_${r.idx}" value="0" checked>
+              Normal
+            </label>
+            <label class="gtlabel">
+              <input type="radio" name="gt_${r.idx}" value="1">
+              Defecto
+            </label>
+          </div>
         </div>
       </article>
     `;
-  }).join('');
+  }).join("");
+
 }
+ 
+
 
 
 // ============================================================================
