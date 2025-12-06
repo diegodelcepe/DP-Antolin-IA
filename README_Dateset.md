@@ -67,6 +67,15 @@ PatchCore utiliza el dataset así:
 2. Construye un **memory bank** -> embeddings de normalidad
 3. Si una nueva imagen **no se parece** -> es anómala
 
+### Creación Única del "Cerebro" (Memory Bank)
+
+Para que el sistema sea rápido y eficiente, todo el **trabajo pesado se hizo una sola vez** al principio (en un notebook de desarrollo). Fue en ese momento cuando se separaron los datos y se extrajo la información clave de las imágenes.
+
+El resultado de ese proceso es un único archivo fijo: **`memory_bank_core.npz`**.
+
+**¿Cómo funciona en la app final?**
+La aplicación **no pierde tiempo aprendiendo de nuevo** ni reorganizando fotos. Simplemente carga ese archivo `.npz` ya listo y lo usa como referencia para juzgar al instante si las piezas nuevas están bien o mal.
+
 El backend devuelve:
 
 * **Score** de anomalía
