@@ -1,0 +1,61 @@
+ANTOLIN - DEPLOYMENT WITH DOCKER
+
+First of all, download Docker from the Microsoft Store (search for Docker Desktop) or from the official website. It can be downloaded from this link: "https://www.docker.com/products/docker-desktop".
+
+Upon opening it, you may need to enable virtualization in your operating system.
+
+To check virtualization status, open Task Manager → Performance → CPU, and verify if virtualization is enabled.
+
+OPTIONAL STEP – ONLY FOR USERS WITH VIRTUALIZATION DISABLED
+
+First, open Windows PowerShell as administrator and paste the following commands:
+
+"dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart"
+
+"dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart"
+
+"dism.exe /online /enable-feature /featurename:Microsoft-Hyper-V-All /all /norestart"
+
+Then, run "bcdedit /set hypervisorlaunchtype auto" and restart your computer.
+
+Once the computer is restarted, open PowerShell as administrator again and run "wsl --install" if you do not already have WSL installed.
+
+If you do have it, execute:
+
+"wsl --update"
+
+"wsl --set-default-version 2"
+
+"wsl --status"
+
+To verify everything is working, run "docker version" and "docker run hello-world".
+If the output shows Docker’s welcome message, everything is set up correctly.
+
+DOCKER – First Launch and Application Setup
+
+⚠️ WARNING: This process should only be done the first time you launch the application.
+
+With Docker running, clone the repository with "git clone https://github.com/diegodelcepe/DP-Antolin-IA.git", and move into the folder using "cd DP-Antolin-IA" and "cd Backend".
+
+Next, switch to the branch that contains the functional Docker setup. Run "git fetch origin" to ensure it's up to date, and then "git checkout docker-mvp".
+
+Finally, Docker will need to containerize the process and install all required dependencies and files necessary to launch the application.
+⚠️ NOTE: You will need at least 13 GB of free disk space to run the application.
+
+Run the command "docker compose build api". This will take roughly 5–10 minutes.
+
+Then run:
+
+"docker compose up -d api"
+
+"docker compose logs -f api"
+
+Once done, you only need to access http://127.0.0.1:8000 in your browser to use the application.
+
+To stop the execution, simply run "docker compose down api" or CRTL+C.
+
+Launching the application after the first setup
+
+⚠️ WARNING: This process should only be done with docker desktop launched.
+
+Once the initial setup is completed and Docker is configured, to launch the application again you have execute "git fetch origin" and "git checkout docker-mvp" in case there are updates. Then, you will have to execute "docker compose down api" and "docker compose up api" to re-launch in docker the container with the updated files.
