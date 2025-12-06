@@ -48,7 +48,7 @@ Internamente carga un **backbone ResNet18**, un **memory bank** (KNN sobre embed
 
 **Flujo resumido:**
 
-```
+```draw.io
 [Cliente/Frontend] --> /predict (POST, imagen)
         |
         v
@@ -81,7 +81,7 @@ Internamente carga un **backbone ResNet18**, un **memory bank** (KNN sobre embed
 ## 3. Estructura de Directorios
   Aquí se explica cómo está distribuido el código fuente dentro del proyecto. Cada carpeta y archivo tiene un propósito claro dentro del backend (carga de modelos, visualización, templates, etc.).
 
-```
+```python
 Backend/
  ├─ main.py                # Núcleo FastAPI + lógica de inferencia
  ├─ requirements.txt       # Dependencias del entorno
@@ -125,7 +125,7 @@ Esta organización modular facilita el mantenimiento, la reproducibilidad y la i
 - Permiten modificar umbrales sin cambiar código. 
 
 **Ejemplo `.env`:**
-```
+```yaml
 THRESHOLD=0.42
 IMG_SIZE=256
 KNN_K=5
@@ -159,7 +159,7 @@ Estas variables permiten ajustar el sistema de forma flexible y reproducible, si
 15. **Visualización (opcional)**: si `SAVE_VIS=1`, generación de overlay, heatmap coloreado, máscara binaria; operaciones morfológicas y extracción/aproximación de contornos y polígonos.  
 16. **Respuesta**: JSON con `score`, `threshold`, `is_anomaly`, `polygons` (si anomalía) y `overlay_url`.
 
-```
+```draw.io
 +-------------------+
 |   Imagen entrada  |
 |   (UploadFile)    |
@@ -287,7 +287,7 @@ De esta manera, el sistema se centra únicamente en las regiones relevantes, mej
 - Score > threshold => `is_anomaly = True`.
 
 **Umbral efectivo:**
-```
+```python
 threshold_base = THRESHOLD (env o config)
 if mode == "sensitive": threshold = threshold_base * 0.8
 elif mode == "strict":  threshold = threshold_base * 1.2
@@ -295,7 +295,7 @@ if thr (param query) != None: threshold = thr  (override total)
 ```
 
 **Normalización del umbral para máscara:**
-```
+```python
 thr_norm = (threshold - hmin) / (hmax - hmin + 1e-8)
 ```
 Se utiliza para segmentar el mapa normalizado en regiones normales y anómalas, facilitando la visualización y la generación de máscaras binarias.
@@ -325,7 +325,7 @@ Se utiliza para segmentar el mapa normalizado en regiones normales y anómalas, 
 - Los polígonos sólo se retornan si `is_anomaly = True`.  
 
 **Ejemplo de respuesta parcial:**
-```
+```json
 {
   "score": 0.57,
   "threshold": 0.42,
@@ -347,7 +347,7 @@ De esta manera, el sistema no solo calcula la anomalía, sino que también ofrec
 - Método: GET
 - Body: ninguno
 - Respuesta 200:
-```
+```javascript
 {
   "status": "ok",
   "device": "cuda" | "cpu",
@@ -362,7 +362,7 @@ De esta manera, el sistema no solo calcula la anomalía, sino que también ofrec
 ### 10.2 GET /
 - Método: GET
 - Sirve `templates/index.html` si existe; si no:
-```
+```json
 { "detail": "templates/index.html no encontrado" }
 ```
 - Uso: entregar frontend simple (subir imagen, ver overlay).
@@ -379,7 +379,7 @@ De esta manera, el sistema no solo calcula la anomalía, sino que también ofrec
   - `file`: imagen (jpeg/png)
 - Respuestas:
   - **200 OK**:
-    ```
+    ```javascript
     {
       "score": float,
       "threshold": float,
@@ -395,7 +395,7 @@ De esta manera, el sistema no solo calcula la anomalía, sino que también ofrec
     - "No existe memory bank: ..." (lanzado en carga inicial)
 
 **Ejemplo (curl):**
-```
+```bash
 curl -X POST "http://localhost:8000/predict?mode=sensitive" \
   -F "file=@./ejemplos/pieza123.png"
 ```
@@ -493,7 +493,7 @@ Puedes cambiar la ruta con la variable de entorno `ARTIFACTS_DIR` (ej.: `ARTIFAC
      - `memory_bank_core.npz`: embeddings/matriz de memoria.
      - `config.json`: parámetros (ej. `{"threshold": 0.35, "embedding_version": "resnet18_layer2_3_concat_v1", "model_version": "1.0.0"}`).
   5. Ejemplo de comando (ajusta al script/notebook que tengas):
-     ```
+     ```javascript
      python tools/build_memory_bank.py --data-dir data/normal \
        --out-dir Backend/models/patchcore --img-size 256 --k 3 --threshold 0.35
      ```
@@ -610,7 +610,7 @@ Estas extensiones permitirían escalar el sistema, mejorar la seguridad y ofrece
   En esta sección se muestran diagramas de texto que ayudan a visualizar la relación entre los distintos componentes del sistema. Son útiles para comprender de un vistazo cómo fluye la información desde el frontend hasta la inferencia y la respuesta.
 
 ### 18.1 Componentes
-```
+```draw.io
 +-------------------+          +--------------------------+
 |  Cliente (Web)    |  HTTP    | FastAPI (/predict,/...)  |
 |  - index.html     | <------> | main.py                  |
@@ -667,7 +667,7 @@ Dado:
 3. Como `score > threshold`, se determina que la imagen es una anomalía.  
 4. Se generan overlays y, tras binarización y operaciones morfológicas, se detectan dos contornos.  
 5. Respuesta JSON:
-```
+```json
 {
   "score": 0.52,
   "threshold": 0.48,
