@@ -36,6 +36,8 @@ const kpiNorm  = document.getElementById('kpiNorm');      // Cantidad Normales
 const kpiAnom  = document.getElementById('kpiAnom');      // Cantidad Anomalías
 const kpiRate  = document.getElementById('kpiRate');      // % de defecto
 const kpiArea  = document.getElementById('kpiArea');      // Área promedio de defectos
+const kpiRecall = document.getElementById('kpiRecall');
+
 
 // --- Vistas y Tablas ---
 const gridView = document.getElementById('gridView');     // Contenedor para vista de cuadrícula (imágenes)
@@ -336,78 +338,114 @@ downloadCsvBtn.addEventListener('click', ()=>{
 // 5. LÓGICA DE ANÁLISIS BATCH (Botón "Analizar")
 // ============================================================================
 
-analyzeBtn.addEventListener("click", async () => {
+// Flag para saber si estamos en fase de GT/recall
+let awaitingGT = false;
+// Guardamos la última respuesta para poder leer idx y filenames
+let lastResultsForGT = null;
 
-  if (selectedFiles.length === 0) {
-    alert("Selecciona imágenes o carpeta.");
+analyzeBtn.addEventListener("click", async () => {
+  // FASE 1: no tenemos aún GT → solo analizamos y mostramos resultados
+  if (!awaitingGT) {
+    if (selectedFiles.length === 0) {
+      alert("Selecciona imágenes o carpeta.");
+      return;
+    }
+
+    clearResults();              // limpiamos UI anterior
+    analyzeBtn.disabled = true;
+    analyzeBtn.textContent = "Procesando...";
+
+    const fd = new FormData();
+    selectedFiles.forEach(f => fd.append("files", f));
+    if (thrManual.checked && thrValue.value) fd.append("thr", thrValue.value);
+    if (modeSel.value) fd.append("mode", modeSel.value);
+
+    try {
+      const r = await fetch("/predict_batch", {
+        method: "POST",
+        body: fd
+      });
+      if (!r.ok) throw new Error("Error servidor");
+
+      const data = await r.json();
+
+      // Guardamos resultados sin GT
+      lastBatch = data;
+      lastResultsForGT = data;
+
+      renderResults(data, selectedFiles);
+      jsonBox.textContent = JSON.stringify(data, null, 2);
+
+      // Ahora sí: pasamos a FASE 2 (esperar GT)
+      awaitingGT = true;
+      analyzeBtn.textContent = "Calcular recall";
+      analyzeBtn.disabled = false;
+
+      // Aún no activamos CSV ni toggle, porque las métricas "finales" serán tras recall
+      updateButtons();
+
+    } catch (err) {
+      jsonBox.textContent = "⚠️ ERROR: " + err.message;
+      console.error(err);
+      analyzeBtn.disabled = false;
+      analyzeBtn.textContent = "Analizar";
+    }
     return;
   }
 
-  clearResults();
-
+  // FASE 2: ya tenemos radios GT en el DOM → calculamos recall
   analyzeBtn.disabled = true;
-  analyzeBtn.textContent = "Procesando...";
-
-  //
-  // 1️⃣ PRIMERA LLAMADA — SIN GT
-  //
-  const fd = new FormData();
-  selectedFiles.forEach(f => fd.append("files", f));
-
-  if (thrManual.checked && thrValue.value) fd.append("thr", thrValue.value);
-  if (modeSel.value) fd.append("mode", modeSel.value);
+  analyzeBtn.textContent = "Calculando recall...";
 
   try {
-    const r = await fetch("/predict_batch", {
-      method: "POST",
-      body: fd
-    });
+    if (!lastResultsForGT || !lastResultsForGT.results) {
+      throw new Error("No hay resultados previos para leer GT.");
+    }
 
-    if (!r.ok) throw new Error("Error servidor");
-
-  const data = await r.json();
-  renderResults(data, selectedFiles);
-
-  // 2️⃣ LEER GT
-  await new Promise(resolve => setTimeout(resolve, 200));
-  const gtLabels = [];
-  data.results.forEach(r => {
+    // 1️⃣ Leer GT desde los radios actuales
+    const gtLabels = [];
+    lastResultsForGT.results.forEach(r => {
       const radios = document.querySelectorAll(`input[name="gt_${r.idx}"]`);
       let val = 0;
       radios.forEach(rb => { if (rb.checked) val = Number(rb.value); });
       gtLabels.push(val);
-  });
-  console.log("GT ENVIADAS:", gtLabels);
+    });
+    console.log("GT ENVIADAS:", gtLabels);
 
-    // 3️⃣ SEGUNDA LLAMADA
-  // 3️⃣ SEGUNDA LLAMADA ─ enviar también los archivos
-  const fd2 = new FormData();
+    // 2️⃣ Preparar nuevo FormData con archivos + GT
+    const fd2 = new FormData();
+    selectedFiles.forEach(f => fd2.append("files", f));
+    if (thrManual.checked && thrValue.value) fd2.append("thr", thrValue.value);
+    if (modeSel.value) fd2.append("mode", modeSel.value);
+    gtLabels.forEach(v => fd2.append("gt_labels", v));
 
-  selectedFiles.forEach(f => fd2.append("files", f));   // 🔥 OBLIGATORIO
-
-  if (thrManual.checked && thrValue.value) fd2.append("thr", thrValue.value);
-  if (modeSel.value) fd2.append("mode", modeSel.value);
-
-  gtLabels.forEach(v => fd2.append("gt_labels", v));
-
-  const r2 = await fetch("/predict_batch", {
+    // 3️⃣ Segunda llamada a /predict_batch
+    const r2 = await fetch("/predict_batch", {
       method: "POST",
       body: fd2
-  });
+    });
+    if (!r2.ok) throw new Error("Error servidor en segunda pasada");
 
-  const data2 = await r2.json();
+    const data2 = await r2.json();
 
+    // 4️⃣ Ahora sí: resultados finales con recall
+    lastBatch = data2;                  // importante para CSV y toggle
+    renderResults(data2, selectedFiles);
+    jsonBox.textContent = JSON.stringify(data2, null, 2);
 
-    // 4️⃣ SOLO AHORA renderResults
-  renderResults(data2, selectedFiles);
-  jsonBox.textContent = JSON.stringify(data2, null, 2);
+    awaitingGT = false;                // volvemos a modo normal
+    analyzeBtn.textContent = "Analizar";
+    analyzeBtn.disabled = false;
+
+    // Ahora que ya tenemos métricas globales (incluyendo recall), activamos CSV/Vista tabla
+    updateButtons();
 
   } catch (err) {
     jsonBox.textContent = "⚠️ ERROR: " + err.message;
     console.error(err);
-  } finally {
     analyzeBtn.disabled = false;
     analyzeBtn.textContent = "Analizar";
+    awaitingGT = false;
   }
 });
 

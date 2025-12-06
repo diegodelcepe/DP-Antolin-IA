@@ -747,23 +747,19 @@ async def predict_batch(
     """
     Predicción en lote para varias imágenes.
 
-    Se devuelve:
-    - `threshold`: el threshold efectivo usado (común a todas las imágenes del batch).
-    - `results`: lista de dicts, uno por imagen, donde CADA ELEMENTO incluye:
-        - filename
-        - score
-        - threshold
-        - is_anomaly
-        - total_defect_area_px
-        - iou (aproximado)
-        - overlay_url
-        - polygons (sólo si es anomalía)
-    - `summary`: resumen para los KPIs del frontend.
+    - Si `gt_labels` es None → solo se devuelven métricas básicas (sin recall).
+    - Si `gt_labels` contiene 0/1 → se calcula `recall` a partir de TP y FN:
+        recall = TP / (TP + FN)
+      donde:
+        TP = GT=1 y modelo dice anomalía
+        FN = GT=1 y modelo dice normal
     """
     if not files:
         raise HTTPException(status_code=400, detail="Sin archivos")
 
-    # Threshold común
+    # ------------------------------
+    # 1) Threshold común a todo el batch
+    # ------------------------------
     threshold_base = THRESHOLD
     if mode == "sensitive":
         threshold_base *= 0.8
@@ -775,36 +771,37 @@ async def predict_batch(
     results = []
     roi_pixels = get_roi_area_pixels()
 
-    # Métricas recall
+    # Contadores para recall
     tp = 0
     fn = 0
 
-    # Contadores para las métricas de la UI
-    n_total = len(files)
-    n_anom = 0
-    all_defect_areas = []
+    # Para KPIs de área
+    all_areas = []
 
     for idx, f in enumerate(files):
+        # a) Leer imagen y pasar a gris 256x256
         img_bgr = imread_from_upload(f)
         img_gray = bgr_to_gray_256(img_bgr, IMG_SIZE)
 
+        # b) Inferencia PatchCore
         heat, heat_norm, hmin, hmax, score = anomaly_map_and_score(
-            img_gray, BACKBONE, HOOK2, HOOK3, KNN,
-            stride=PATCH_STRIDE, roi_mask=ROI_MASK
+            img_gray,
+            BACKBONE, HOOK2, HOOK3, KNN,
+            stride=PATCH_STRIDE,
+            roi_mask=ROI_MASK,
         )
 
         is_anomaly = bool(score > threshold_base)
-        if is_anomaly:
-            n_anom += 1
 
-        base_name = os.path.splitext(f.filename)[0].replace(" ", "_")
+        base_name = os.path.splitext(f.filename or "upload")[0].replace(" ", "_")
 
         defect_area_total = 0.0
         defect_area_max = 0.0
         iou_val = 0.0
         ov_url = None
-        polys = []
+        polys: List[List[List[int]]] = []
 
+        # c) Visuales y áreas
         if SAVE_VIS:
             thr_norm = (threshold_base - hmin) / (hmax - hmin + 1e-8)
 
@@ -821,21 +818,28 @@ async def predict_batch(
                 mx_area,
                 _mask_arr,
             ) = save_visuals_and_polys(
-                img_gray, heat_norm, AREA_MIN, base_name, thr_norm, ROI_MASK
+                img_gray,
+                heat_norm,
+                area_min=AREA_MIN,
+                base_name=base_name,
+                thr_norm=thr_norm,
+                roi_mask=ROI_MASK,
             )
 
-            defect_area_total = tot_area
-            defect_area_max = mx_area
+            defect_area_total = float(tot_area)
+            defect_area_max = float(mx_area)
             ov_url = url
 
             if is_anomaly:
                 polys = p_list
-                all_defect_areas.append(defect_area_total)
 
+            all_areas.append(defect_area_total)
+
+            # IoU aproximado: área_defecto_total / área_ROI
             if roi_pixels > 0:
                 iou_val = min(1.0, defect_area_total / roi_pixels)
 
-        # ---- Calcular Recall ----
+        # d) Cálculo de TP/FN para recall (solo si hay GT)
         if gt_labels is not None and idx < len(gt_labels):
             gt_is_defective = bool(gt_labels[idx])
             if gt_is_defective:
@@ -844,14 +848,13 @@ async def predict_batch(
                 else:
                     fn += 1
 
-       
-        # Nombre "amigable" para el frontend: solo el nombre del archivo, sin carpetas
+        # nombre "limpio" para el front (sin rutas)
         orig_name = f.filename or "upload"
         safe_name = orig_name.replace("\\", "/").split("/")[-1]
 
         results.append({
             "idx": idx,
-            "filename": safe_name,  # ← ahora solo 'img_2024-12-03_....png'
+            "filename": safe_name,
             "score": float(score),
             "threshold": float(threshold_base),
             "is_anomaly": is_anomaly,
@@ -862,16 +865,24 @@ async def predict_batch(
             "polygons": polys,
         })
 
-
-    # === Resumen para los KPIs del frontend ===
+    # ------------------------------
+    # 2) KPIs globales
+    # ------------------------------
     total_images = len(results)
     anomalies = sum(1 for r in results if r["is_anomaly"])
     normals = total_images - anomalies
     defect_rate = float(anomalies) / float(total_images) if total_images > 0 else 0.0
 
-    # Media de área de defecto (usando total_defect_area_px)
-    areas = [r["total_defect_area_px"] for r in results]
-    avg_defect_area_px = float(sum(areas) / len(areas)) if areas else 0.0
+    avg_defect_area_px = float(sum(all_areas) / len(all_areas)) if all_areas else 0.0
+
+    # ---- RECALL ----
+    recall: Optional[float] = None
+    if gt_labels is not None:
+        positives = tp + fn
+        print("[DEBUG] gt_labels:", gt_labels, "tp:", tp, "fn:", fn, "positives:", positives)
+        if positives > 0:
+            recall = tp / positives
+
 
     summary = {
         "total_images": total_images,
@@ -879,6 +890,7 @@ async def predict_batch(
         "normals": normals,
         "defect_rate": defect_rate,
         "avg_defect_area_px": avg_defect_area_px,
+        "recall": recall,
     }
 
     return {
