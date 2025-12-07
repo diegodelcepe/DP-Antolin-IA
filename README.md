@@ -53,8 +53,8 @@ DP-Antolin-IA/
 ├── notebooks/                   # Training & memory bank generation
 ├── docker-compose.yml
 ├── Dockerfile.cpu               # Default CPU-only Docker image
-├── Backend_Documentation         
-├── Deployment_Manual
+├── Backend_Documentation.md        
+├── Deployment_Manual.txt
 ├── README_Dataset.md
 ├── User_Manual.pdf
 └── README.md
