@@ -18,7 +18,7 @@ html,body{height:100%}
 body{
   margin:0;
   color:var(--text);
-  background: url("./background_frontend.jpeg") center/cover fixed no-repeat, var(--bg);
+  background: url("./background_frontend.jpg") center/cover fixed no-repeat, var(--bg);
   font:14px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Arial, sans-serif;
 }
 
