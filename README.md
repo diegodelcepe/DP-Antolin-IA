@@ -3,82 +3,112 @@
 
 # PatchCore Anomaly Inspector
 
-## FastAPI • Docker GPU • ResNet18 • PatchCore KNN
+## FastAPI • Docker • ResNet18 • PatchCore KNN • Web UI
 
-Sistema de detección de anomalías industrial basado en PatchCore (ResNet-18 + Memory Bank). Diseñado para inspección de calidad automatizada con soporte de GPU.
+This project implements a local industrial anomaly detection system based on PatchCore, using feature extraction with ResNet-18 and a precomputed memory bank.
+It includes a complete FastAPI backend, a modern Web UI, IoU metrics, batch processing, real-time camera inspection, and Docker-based deployment.
 
-## Características Principales
+## Main Features
 
-* Core: Extracción de características con ResNet-18 y detección por vecindad (KNN).
+* Core: Feature extraction using ResNet-18 and KNN-based neighborhood comparison.
 
-* Interfaz Web: Dashboard para análisis por lotes, métricas (IoU, Score), heatmaps y modo cámara en tiempo real.
+* Web Interface: Dashboard for batch analysis, metrics (IoU, score), heatmaps, and real-time camera mode.
 
-* API: Backend robusto en FastAPI.
+* API: Robust backend built with FastAPI.
 
-* ROI Avanzado: Soporte para máscaras de exclusión y márgenes de borde.
+* Advanced ROI: Support for exclusion masks and border margins.
 
-* Logging: Registro automático de predicciones en CSV.
+* Logging: Automatic recording of predictions into a CSV file.
 
-## Puesta en Marcha (Docker)
+## Running the Project (Docker)
 ```
-El proyecto está contenerizado y configurado para usar NVIDIA GPU automáticamente.
+The project is containerized and configured to run automatically.
 
-# 1. Construir y levantar el servicio
-docker compose up -d --build
+# 1. Build and start the service
+docker compose up -d --build api
 
-# 2. Ver logs en tiempo real
+# 2. View real-time logs
 docker compose logs -f api
 
-# 3. Detener
-docker compose down
+# 3. Stop the service
+docker compose down api
 ```
 
-Acceso: La interfaz web estará disponible en http://localhost:8000.
+Access the Web UI at: http://localhost:8000.
 
-## Estructura Clave
+## Project Structure
 ```
-docker-mvp/
-├─ Backend/
-│  ├─ models/patchcore/   # Memory bank y config (.npz, .json)
-│  ├─ static/overlays/    # Salida de heatmaps y máscaras generadas
-│  ├─ logs/               # Contiene predictions.csv
-│  ├─ .env                # Configuración principal
-│  └─ main.py             # Entrypoint FastAPI
-├─ Dockerfile.gpu
-└─ docker-compose.yml
+DP-Antolin-IA/
+├── Backend/
+│   ├── main.py                  # FastAPI backend + PatchCore pipeline
+│   ├── models/patchcore/        # Memory bank + config.json
+│   ├── static/
+│   │   ├── assets/              # Frontend JS + CSS
+│   │   └── overlays/            # Generated overlays and heatmaps
+│   ├── templates/index.html     # Web UI
+│   ├── logs/predictions.csv     # Auto-generated logs
+│   └── .env                     # Backend configuration
+│
+├── Dataset/                     # Local dataset (optional)
+├── notebooks/                   # Training & memory bank generation
+├── docker-compose.yml
+├── Dockerfile.cpu               # Default CPU-only Docker image
+├── Backend_Documentation         
+├── Deployment_Manual
+├── README_Dataset.MD
+├── User_Manual.pdf
+└── README.md
+
 ```
 
-## Configuración (.env)
+## Environment Variables (.env)
 
-Los parámetros del modelo se ajustan en Backend/.env. Las variables más importantes:
+The main model parameters are defined in Backend/.env. Key variables include:
 
-* THRESHOLD: Umbral de decisión (def: 0.35).
+* THRESHOLD: Decision threshold (default: 0.33).
 
-* IMG_SIZE: Resolución de entrada (def: 256).
+* IMG_SIZE: Input resolution (default: 256).
 
-* SAVE_VIS: 1 para guardar imágenes de debug (overlays/heatmaps).
+* SAVE_VIS: Set to 1 to save debug images (overlays/heatmaps).
 
-* ROI_PATH: Ruta a la máscara PNG para limitar la zona de inspección.
+* ROI_PATH: Path to a PNG mask defining the inspection region.
 
 ## API Endpoints
 
-| Método | Endpoint | Descripción |
+| Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `GET` | `/` | Carga la Interfaz Web (UI). |
-| `GET` | `/health` | Estado del servicio y config actual. |
-| `POST` | `/predict` | Inferencia de imagen única (params: `thr`, `source`). |
-| `POST` | `/predict_batch` | Procesa múltiples imágenes y devuelve métricas. |
+| `GET` | `/` | Loads the Web Interface (UI). |
+| `GET` | `/health` | Service status and current configuration. |
+| `POST` | `/predict` | Single-image inference (params: `thr`, `source`). |
+| `POST` | `/predict_batch` | Processes multiple images and returns metrics. |
 
-## Arquitectura Técnica
+## Technical Architecture
 
-1. Preproceso: Redimensión y normalización.
+1. Preprocessing: Image resizing and normalization.
 
-2. Extracción: Hooks en layer2 y layer3 de ResNet-18.
+2. Feature Extraction: Hooks in ResNet-18 layer2 and layer3.
 
-3. PatchCore: Comparación con memory bank usando KNN ($K=3$).
+3. PatchCore: Comparison with the memory bank using KNN ($K=3$).
 
-4. Scoring: Máximo valor del mapa de calor dentro de la ROI válida.
+4. Scoring: Maximum heatmap value restricted to the valid ROI.
 
-5. Métricas: Cálculo de IoU (Real si hay GT, aproximado si no).
+5. Metrics: IoU calculation (Real IoU if ground truth mask is provided; approximate IoU otherwise).
+
+## Web Interface (Frontend)
+The Web UI (HTML + JS + CSS) provides:
+* Image input: multiple file uploads, drag & drop.
+* Threshold configuration: detection modes (normal, sensitive, strict).
+* Results view: gallery view, table view, CSV export, KPIs dashboard.
+
+## Real-Time Camera Inspection
+The interface includes a live camera module that:
+* Captures frames every 1.5 seconds.
+* Displays: overlay heatmap, score, total defect area, state (NORMAL / ANOMALY), approximate IoU.
+
+## Recall Metric
+Users can manually assign the correct label after the first batch run:
+* Each image includes two radio buttons: Normal / Defect.
+* The ground-truth labels are sent in a second request.
+* Recall is computed and shown in the KPI panel.
 
 ---

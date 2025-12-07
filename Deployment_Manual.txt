@@ -37,7 +37,7 @@ DOCKER – First Launch and Application Setup
 
 With Docker running, clone the repository with "git clone https://github.com/diegodelcepe/DP-Antolin-IA.git", and move into the folder using "cd DP-Antolin-IA" and "cd Backend".
 
-Next, switch to the branch that contains the functional Docker setup. Run "git fetch origin" to ensure it's up to date, and then "git checkout docker-mvp".
+Next, switch to the branch that contains the functional Docker setup. Run "git fetch origin" to ensure it's up to date.
 
 Finally, Docker will need to containerize the process and install all required dependencies and files necessary to launch the application.
 ⚠️ NOTE: You will need at least 13 GB of free disk space to run the application.
